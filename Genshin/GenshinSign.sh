@@ -40,7 +40,7 @@ function getjsonvalue
 function workwei()
 {
 #echo -e $1
-curl -s "${bot}" \
+curl -s "${workweibot}" \
   -H 'Content-Type: application/json' \
   -d '
    {
@@ -49,7 +49,7 @@ curl -s "${bot}" \
             "content": "'"$1"'"
         }
    }'
-#echo ""
+echo ""
 }
 
 function signCheck
@@ -103,7 +103,28 @@ function sign
         echo " N${signResult}"
     fi
 }
-
+function dailyNote
+{
+  dailyNoteUrl="https://api-takumi-record.mihoyo.com/game_record/app/genshin/api/dailyNote?role_id=${game_uid}&server=${region}"
+  #echo ${dailyNoteUrl}
+  salt2="xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
+    time1=`date +%s`
+    random1="180010"
+    md51=`echo -n "salt=${salt2}&t=${time1}&r=${random1}&b=&q=role_id=${game_uid}&server=${region}" | md5sum`
+    md51=${md51%% *}
+  curl -s "${dailyNoteUrl}" -H "User-Agent: miHoYoBBS/2.33.1" -H "Cookie: ${cookie}" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.33.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -w %{http_code}
+}
+function character
+{
+  dailyNoteUrl="https://api-takumi-record.mihoyo.com/game_record/app/genshin/api/character"
+  data1='{"role_id":"'${game_uid}'","server":"'${region}'"}'
+  salt2="xV8v4Qu54lUKrEYFZkJhB8cuOh9Asafs"
+  time1=`date +%s`
+    random1="180010"
+  md51=`echo -n "salt=${salt2}&t=${time1}&r=${random1}&b=${data1}&q=" | md5sum`
+    md51=${md51%% *}
+  curl -s "${dailyNoteUrl}" -d "${data1}" -H "User-Agent: miHoYoBBS/2.33.1" -H "Cookie: ${cookie}" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.33.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -w %{http_code}
+}
 function startSign
 {
 startTime=`date +"%F %T %A"`
@@ -112,14 +133,14 @@ echo "${startTime} 签到开始"
 cookieNum=1
 while read line
 do
-    echo -n "Cookie${cookieNum} 开始: "
+    echo "Cookie${cookieNum} 开始: "
     msg="${msg}\n{${cookieNum}}"
     #echo ${line}
     getRoleUrl=''
     configRegion=${line%% *}
     #echo "A${configRegion}A"
     configName=${configRegion%%@*}
-    echo ${configName}
+    echo -n " ${configName},"
     configRegion=${configRegion#*@}
     #echo "A${configRegion}A"
     cookie=${line#* }
@@ -164,7 +185,7 @@ do
                     ((numOfAccount++))
                 done
                 let numOfAccount=numOfAccount-3
-                echo " 有${numOfAccount}个角色"
+                echo "有${numOfAccount}个角色"
                 tmp=`cat ${tmpfile} | awk -F "[" '{print $2}' | awk -F "]" '{print $1}'`
                 tmp=${tmp#*${zkh}}
                 for ((i=0;i<numOfAccount;i++))
@@ -182,6 +203,8 @@ do
                     game_uid=`getjsonvalue "${account}" "game_uid"`
                     echo -n "   ${region_name} ${level}级的 ${nickname}(${game_uid}): "
                     msg="${msg}${region_name} ${level}级的 ${nickname}(${game_uid}): "
+       #dailyNote
+       #character
                     result=`signCheck`
                     if [ g"${result}" = g"0" ]; then
                       result=`sign`
