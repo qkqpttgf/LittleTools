@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #WorkWeiBot="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx"
-#DingDingBot=""
-#SCKEY=""
+#DingDingBot="https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxx"
+#SCKEY="SCTxxxxxxxx"
 
 #------------------------------
 #cd "$(dirname "$0")"
@@ -53,16 +53,17 @@ function DingDing()
     {
       "msgtype": "text",
       "text": {
-        "content": "'"`date "+%F %T %A"`$1"'"
+        "content": "'"$1"'"
       }
     }'
-  echo .
+  echo ""
 }
 function FTQQ()
 {
   echo -n "Server酱："
-  url="https://sc.ftqq.com/${SCKEY}.send"
-  data="`date "+%F %T %A"`\n$2"
+  url="https://sctapi.ftqq.com/${SCKEY}.send"
+  #data="`date "+%F %T %A"`\n$2"
+  data="$2"
   n='
 '
   n1='\\n'
@@ -71,7 +72,7 @@ function FTQQ()
      
   curl -s "${url}" \
     -d "${data}"
-  echo .
+  echo ""
 }
 
 function signCheck
@@ -266,8 +267,8 @@ endTime=`date +"%F %T %A"`
 echo "${endTime} 签到结束"
 msg="${endTime}${msg}"
 #echo ${msg}
-[ g"${WorkWeiBot}" != g"" ] && WorkWei "${msg}" || echo "未设置企业微信通知"
-[ g"${DingDingBot}" != g"" ] && DingDing "${msg}" || echo "未设置钉钉通知"
+[ g"${WorkWeiBot}" != g"" ] && WorkWei "原神签到\n${msg}" || echo "未设置企业微信通知"
+[ g"${DingDingBot}" != g"" ] && DingDing "原神签到\n${msg}" || echo "未设置钉钉通知"
 [ g"${SCKEY}" != g"" ] && FTQQ "原神签到" "${msg}" || echo "未设置Server酱通知"
 
 }
