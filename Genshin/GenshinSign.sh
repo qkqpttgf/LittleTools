@@ -1,27 +1,19 @@
 #!/bin/bash
 
-#workweibot='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxxxxx'
+#WorkWeiBot="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx"
+#DingDingBot=""
+#SCKEY=""
 
 #------------------------------
 #cd "$(dirname "$0")"
 configFolder="$HOME/.config/Genshin_Sign"
 [ ! -d ${configFolder} ] && mkdir -p "${configFolder}"
-cookieFile="${configFolder}/.Genshin_Sign.conf"
+cookieFile="${configFolder}/Genshin_Sign.conf"
 tmpfile="/tmp/mihoyo_sign"
-
-#cnConfig["getRoleUrl"]="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn"
-#cnConfig["checkSignUrl"]="https://api-takumi.mihoyo.com/event/bbs_sign_reward/info"
-#cnConfig["signUrl"]="https://api-takumi.mihoyo.com/event/bbs_sign_reward/sign"
-#cnConfig["act_id"]="e202009291139501"
-
-#glConfig["getRoleUrl"]="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hk4e_global"
-#glConfig["checkSignUrl"]="https://hk4e-api-os.mihoyo.com/event/sol/info"
-#glConfig["signUrl"]="https://hk4e-api-os.mihoyo.com/event/sol/sign"
-#glConfig["act_id"]="e202102251931481"
-
     syh='"'
     zkh='{'
     ykh='}'
+
 function getjsonvalue
 {
     # $1 json string
@@ -37,10 +29,11 @@ function getjsonvalue
     value=${value%${ykh}*}
     echo ${value}
 }
-function workwei()
+function WorkWei()
 {
 #echo -e $1
-curl -s "${workweibot}" \
+echo -n "企业微信机器人："
+curl -s "${WorkWeiBot}" \
   -H 'Content-Type: application/json' \
   -d '
    {
@@ -50,6 +43,35 @@ curl -s "${workweibot}" \
         }
    }'
 echo ""
+}
+function DingDing()
+{
+  echo -n "钉钉机器人："
+  curl -s "${DingDingBot}" \
+    -H 'Content-Type: application/json' \
+    -d '
+    {
+      "msgtype": "text",
+      "text": {
+        "content": "'"`date "+%F %T %A"`$1"'"
+      }
+    }'
+  echo .
+}
+function FTQQ()
+{
+  echo -n "Server酱："
+  url="https://sc.ftqq.com/${SCKEY}.send"
+  data="`date "+%F %T %A"`\n$2"
+  n='
+'
+  n1='\\n'
+  data=${data//${n1}/${n}${n}}
+  data='text='"$1"'&desp='"${data}"
+     
+  curl -s "${url}" \
+    -d "${data}"
+  echo .
 }
 
 function signCheck
@@ -64,7 +86,7 @@ function signCheck
         if [ g"$1" != g"" ]; then
           echo ${signedDays}
         else
-          echo "今日已经签过，本月已签${signedDays}天"
+          echo "今日签过，本月已签${signedDays}天"
         fi
       else
         echo 0
@@ -134,13 +156,14 @@ cookieNum=1
 while read line
 do
     echo "Cookie${cookieNum} 开始: "
-    msg="${msg}\n{${cookieNum}}"
+    #msg="${msg}\n{${cookieNum}},"
     #echo ${line}
     getRoleUrl=''
     configRegion=${line%% *}
     #echo "A${configRegion}A"
     configName=${configRegion%%@*}
     echo -n " ${configName},"
+    msg="${msg}\n${configName}:"
     configRegion=${configRegion#*@}
     #echo "A${configRegion}A"
     cookie=${line#* }
@@ -211,8 +234,8 @@ do
                       #echo ${result}
                       if [ g"${result}" = g"OK" ]; then
                         checkedDay=`signCheck 1`
-                        echo "签到成功，本月共签${checkedDay}天。"
-                        msg="${msg}签到成功，本月共签${checkedDay}天。"
+                        echo "签到成功，本月共签${checkedDay}天"
+                        msg="${msg}签到成功，本月共签${checkedDay}天"
                       else
                         echo ${result}
                         msg="${msg}${result}"
@@ -243,11 +266,9 @@ endTime=`date +"%F %T %A"`
 echo "${endTime} 签到结束"
 msg="${endTime}${msg}"
 #echo ${msg}
-if [ g"${workweibot}" != g"" ]; then
-  workwei "${msg}"
-else
-  echo "可以在脚本最开始填入企业微信机器人url，把结果发送到企业微信。"
-fi
+[ g"${WorkWeiBot}" != g"" ] && WorkWei "${msg}" || echo "未设置企业微信通知"
+[ g"${DingDingBot}" != g"" ] && DingDing "${msg}" || echo "未设置钉钉通知"
+[ g"${SCKEY}" != g"" ] && FTQQ "原神签到" "${msg}" || echo "未设置Server酱通知"
 
 }
 
