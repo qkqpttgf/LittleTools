@@ -46,14 +46,16 @@ echo ""
 }
 function DingDing()
 {
+  ddstring="$1"
+  ddstring="${ddstring//${syh}/}"
   echo -n "钉钉机器人："
-  curl -s "${DingDingBot}" \
+  curl -s -4 "${DingDingBot}" \
     -H 'Content-Type: application/json' \
     -d '
     {
       "msgtype": "text",
       "text": {
-        "content": "'"$1"'"
+        "content": "'"${ddstring}"'"
       }
     }'
   echo ""
