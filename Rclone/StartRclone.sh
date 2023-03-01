@@ -1,15 +1,31 @@
 
 exist_systemctl=`type systemctl >/dev/null && echo $?`
 if [ g"${exist_systemctl}" = g"0" ]; then
-  echo "systemctl ok"
+  echo "systemctl ok."
 else
-  echo "No systemctl, exit"
+  echo "No systemctl, maybe other OS. exit!"
   exit 0
+fi
+
+exist_fuse=`lsmod | grep fuse`
+if [ g"${exist_fuse}" = g"" ]; then
+  echo "No FUSE, please check. exit!"
+  exit 0
+else
+  echo "FUSE ok."
 fi
 
 rcloneFile="/usr/bin/rclone"
 mountPath="/root"
 configFile="/root/.config/rclone/rclone.conf"
+
+had_lable=`cat "${configFile}" | grep '\['`
+if [ g"${had_lable}" = g"" ]; then
+  echo "No config or No lable in config. exit!"
+  exit 0
+else
+  echo "config ok."
+fi
 
 [ -s "/etc/systemd/system/rclone@.service" ] && mv /etc/systemd/system/rclone@.service /etc/systemd/system/rclone@.service.bak
 cat << EOF > /etc/systemd/system/rclone@.service
