@@ -1,4 +1,6 @@
-# 原神每日签到
+# 米游社每日签到
+
+原神、星穹铁道
 
 感谢 [云崽](https://github.com/Le-niao/Yunzai-Bot/commit/17b6fe7d5d90ac4d9c6c1c907221eef9b0fb1725) 的修复！  
 
