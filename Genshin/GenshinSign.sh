@@ -178,7 +178,7 @@ function startSign {
       i1=0
       while [ $i1 -lt 2 ]; do
         if [ $i1 -eq 0 ]; then
-          echo "原神"
+          echo -n "原神，"
           msg="${msg}\n原神"
           if [ g"${configRegion}" = g"cn" ]; then
             getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn"
@@ -194,7 +194,7 @@ function startSign {
           fi
         fi
         if [ $i1 -eq 1 ]; then
-          echo "星穹铁道"
+          echo -n "星穹铁道，"
           msg="${msg}\n星穹铁道"
           if [ g"${configRegion}" = g"cn" ]; then
             getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hkrpg_cn"
@@ -203,9 +203,12 @@ function startSign {
             act_id="e202304121516551"
           fi
           if [ g"${configRegion}" = g"global" ]; then
-            getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
-            checkSignUrl="https://hk4e-api-os.mihoyo.com/event/luna/info"
-            signUrl="https://hk4e-api-os.mihoyo.com/event/luna/sign"
+          #  getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
+            getRoleUrl="https://sg-public-api.hoyolab.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
+          #  checkSignUrl="https://api-os-takumi.mihoyo.com/event/luna/info"
+            checkSignUrl="https://sg-public-api.hoyolab.com/event/luna/info"
+          #  signUrl="https://api-os-takumi.mihoyo.com/event/luna/sign"
+            signUrl="https://sg-public-api.hoyolab.com/event/luna/sign"
             act_id="e202303301540311"
           fi
         fi
@@ -233,6 +236,7 @@ function startSign {
             done
             let numOfAccount=numOfAccount-3
             echo "有${numOfAccount}个角色"
+            msg="${msg}，有${numOfAccount}个角色"
             tmp=$(cat ${tmpfile} | awk -F "[" '{print $2}' | awk -F "]" '{print $1}')
             tmp=${tmp#*${zkh}}
             for ((i = 0; i < numOfAccount; i++)); do
