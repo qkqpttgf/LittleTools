@@ -7,4 +7,4 @@
 1，单文件，编译后运行。  
 2，第一次会引导绑定设备，在网页上进行。  
 3，通过命令`ewectl turnon xxxxxxxxx`来打开对应设备，`ewectl turnoff xxxxxxxxxx`来关闭。  
-4，在crontab中设置好开关时间。  
+4，在crontab中设置好开关时间（此时请指定配置文件位置`/root/ewectl -c /var/config.db turnon xxxxxxxxxx`，不然容易找不到配置）。  
