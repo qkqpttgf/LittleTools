@@ -91,8 +91,13 @@ func main() {
 func parseCommandLine() {
 	configFile := false
 	turnLight1 := false
+	softPath := ""
 	for argc, argv := range os.Args {
 		conlog(fmt.Sprintf("%d: %v\n", argc, argv))
+		if argc == 0 {
+			softPath = argv
+			softPath = softPath[0:strings.LastIndex(softPath, "/")]
+		}
 		if argv == "web" {
 			startWeb = true
 			continue
@@ -120,7 +125,7 @@ func parseCommandLine() {
 		}
 	}
 	if dbFilePath == "" {
-		dbFilePath = "./config.db"
+		dbFilePath = softPath + "/config.db"
 	}
 }
 
