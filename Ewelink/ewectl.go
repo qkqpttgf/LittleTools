@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -53,9 +54,15 @@ func appInit() {
 
 var quit chan int
 var accessToken string
+var slash string
 
 func main() {
 	conlog(passlog("Program Start") + "\n")
+	if runtime.GOOS == "windows" {
+		slash = "\\"
+	} else {
+		slash = "/"
+	}
 	parseCommandLine()
 	apiInit()
 	if validToken() {
@@ -93,10 +100,15 @@ func parseCommandLine() {
 	turnLight1 := false
 	softPath := ""
 	for argc, argv := range os.Args {
-		conlog(fmt.Sprintf("%d: %v\n", argc, argv))
+		fmt.Printf(" %d: %v\n", argc, argv)
 		if argc == 0 {
 			softPath = argv
-			softPath = softPath[0:strings.LastIndex(softPath, "/")]
+			pos := strings.LastIndex(softPath, slash)
+			if pos > -1 {
+				softPath = softPath[0:pos+1]
+			} else {
+				softPath = ""
+			}
 		}
 		if argv == "web" {
 			startWeb = true
@@ -125,7 +137,7 @@ func parseCommandLine() {
 		}
 	}
 	if dbFilePath == "" {
-		dbFilePath = softPath + "/config.db"
+		dbFilePath = softPath + "config.db"
 	}
 }
 
@@ -157,8 +169,8 @@ func startTmpSrv() {
 		conlog("Oauth Server start faild\n")
 	} else {
 		conlog("Oauth Server started\n")
-		conlog("Please visit http://{your ip}:60576/ in a browser.\n")
-		fmt.Println("Waiting...")
+		conlog("Please visit http://{your_ip}:60576/ in a browser.\n")
+		fmt.Print("Waiting...")
 	}
 }
 func listenHttp(bindIP string, port int) *http.Server {
@@ -212,13 +224,16 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	//fmt.Println(r.TLS != nil, r.Host, r.URL)
 	//fmt.Println(r.Header)
-	//path := r.URL.Path
+	path := r.URL.Path
 	//fmt.Println("_" + path)
     query := r.URL.Query()
     //fmt.Println(query.Get("a"))
 	//data := r.Form
 	//fmt.Println(data)
 	//-------------------------
+	if path != "/" {
+		return
+	} 
 	if query.Get("code") != "" {
 		// 有code
 		conlog("  received a code\n")
@@ -249,12 +264,12 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 				conlog("  saving access token faild\n")
 				htmlOutput(w, "saving access token faild", 400, nil)
 			} else {
-				//"thingList":[],"total":1 我列不出来暂不自动处理
 				//deviceIDs := listDevices()
+				//"thingList":[],"total":1 我列不出来暂不会自动处理
 				html := `手动输入设备ID（在易微联APP或小程序里查看）：
 <form action="?install=2" method="post" name="form1">
-	Device ID: <input name="deviceID" type="text">
-	<button >submit</button>
+	Device ID: <input name="deviceID" type="text"><br>
+	<button>提交</button>
 <form>
 只处理1个设备，多个设备以后再说
 `
@@ -270,13 +285,9 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 				html := "Something error in saving: " + fmt.Sprint(err)
 				htmlOutput(w, html, 400, nil)
 			} else {
-				if err != nil {
-					html := "Something error in saving: " + fmt.Sprint(err)
-					htmlOutput(w, html, 400, nil)
-				} else {
-					htmlOutput(w, "Success", 200, nil)
-					quit<-1
-				}
+				htmlOutput(w, "Success", 200, nil)
+				conlog("  Success\n")
+				quit<-1
 			}
 		} else {
 			if query.Get("install") == "1" {
@@ -288,6 +299,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 					html := "Something error in saving: " + fmt.Sprint(err)
 					htmlOutput(w, html, 400, nil)
 				} else {
+					conlog("  redirecting to Ewelink\n")
 					appInit()
 					time1 := time.Now().Unix() * 1000
 					signstr := ComputeHmac256(oauthapp.appID + "_" + fmt.Sprint(time1), oauthapp.appSecret)
@@ -307,10 +319,11 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	location.href = url;
 </script>`
 					//fmt.Fprint(w, html)
-					conlog("  redirecting to Ewelink\n")
 					htmlOutput(w, html, 200, nil)
 				}
 			} else {
+				fmt.Print("\r")
+				conlog("  OAuth Page Start\n")
 				html := `
 1. 在 https://dev.ewelink.cc/#/console 登录，申请成为开发者（可能要等几天）<br>
 2. 新建一个应用（个人开发者只能创建一个），将跳转地址设为下面 Redirect URL 中的url（其实就是当前页面）<br>
@@ -319,12 +332,12 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	App ID: <input name="appID" type="text"><br>
 	App Secret: <input name="appSecret" type="password"><br>
 	Redirect URL: <input name="redirectUrl" type="text"><br>
-	<button >submit</button>
+	<button>提交</button>
 <form>
 <script>
 	document.form1.redirectUrl.value = location.href;
 </script>
-	`
+`
 				htmlOutput(w, html, 201, nil)
 			}
 		}
@@ -490,13 +503,13 @@ func validToken() bool {
 			if accessToken == "" {
 				return false
 			}
-			appInit()
-			//fmt.Println("_" + accessToken + "_")
-			atExpiredTime, err := readConfig(1, "atExpiredTime")
-			if err != nil {
-				fmt.Println(err)
+			dIDs, _ := readConfig(1, "deviceIDs")
+			if dIDs == "" {
 				return false
 			}
+			appInit()
+			//fmt.Println("_" + accessToken + "_")
+			atExpiredTime, _ := readConfig(1, "atExpiredTime")
 			if len(atExpiredTime) > 3 {
 				atExpiredTime = atExpiredTime[0:len(atExpiredTime)-3]
 			}
