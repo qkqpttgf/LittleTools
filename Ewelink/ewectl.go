@@ -1,9 +1,10 @@
 package main
+
 import (
 	"bufio"
 	"crypto/hmac"
-    "crypto/sha256"
-    "encoding/base64"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -58,6 +59,7 @@ var slash string
 
 func main() {
 	conlog(passlog("Program Start") + "\n")
+	defer conlog(passlog("Program End") + "\n")
 	if runtime.GOOS == "windows" {
 		slash = "\\"
 	} else {
@@ -82,17 +84,20 @@ func main() {
 		}
 		if startWeb {
 			startSrv()
-			waitSYS()
 			stopSrv()
 		}
 	} else {
-		conlog(alertlog("no valid token, start to Oauth.") + "\n")
+		conlog(alertlog("no valid token, OAuth start.") + "\n")
 		startTmpSrv()
-		waitOauth()
 		stopSrv()
 	}
-
-	conlog(passlog("Program End") + "\n")
+	/*fmt.Printf("Press any key to exit...\n")
+	exec.Command("stty","-F","/dev/tty","cbreak","min","1").Run()
+	exec.Command("stty","-F","/dev/tty","-echo").Run()
+	defer exec.Command("stty","-F","/dev/tty","echo").Run()
+    b := make([]byte, 1)
+    os.Stdin.Read(b)*/
+	//fmt.Println(a,b)
 }
 
 func parseCommandLine() {
@@ -139,6 +144,7 @@ func parseCommandLine() {
 	if dbFilePath == "" {
 		dbFilePath = softPath + "config.db"
 	}
+	conlog("Using datebase: " + dbFilePath + "\n")
 }
 
 func conlog(log string) {
@@ -157,20 +163,22 @@ func startSrv() {
 	http.HandleFunc("/", route)
 	Server = listenHttp("", 60575)
 	if Server == nil {
-		conlog("Server start faild\n")
+		conlog("Server start failed\n")
 	} else {
 		conlog("Server started\n")
+		waitSYS()
 	}
 }
 func startTmpSrv() {
 	http.HandleFunc("/", oauthroute)
 	Server = listenHttp("", 60576)
 	if Server == nil {
-		conlog("Oauth Server start faild\n")
+		conlog("OAuth Server start failed\n")
 	} else {
-		conlog("Oauth Server started\n")
-		conlog("Please visit http://{your_ip}:60576/ in a browser.\n")
+		conlog("OAuth Server started\n")
+		conlog("Please visit http://{YourIP}:60576/ in a browser.\n")
 		fmt.Print("Waiting...")
+		waitOauth()
 	}
 }
 func listenHttp(bindIP string, port int) *http.Server {
@@ -179,7 +187,7 @@ func listenHttp(bindIP string, port int) *http.Server {
 	srv1, err := net.Listen("tcp", fmt.Sprintf("%v:%d", bindIP, port))
 	if err != nil {
 		conlog(fmt.Sprint(err, "\n"))
-		conlog(alertlog("http start faild") + "\n")
+		conlog(alertlog("http start failed") + "\n")
 		return nil
 	}
 	go srv.Serve(srv1)
@@ -198,18 +206,41 @@ func stopSrv() {
 }
 func waitSYS() {
 	sysSignalQuit := make(chan os.Signal, 1)
+	defer close(sysSignalQuit)
 	signal.Notify(sysSignalQuit, syscall.SIGINT, syscall.SIGTERM)
-	<-sysSignalQuit
+	<- sysSignalQuit
+	fmt.Print("\n")
 }
 func waitOauth() {
-	quit = make(chan int, 1)
-	<-quit
+	count := 1
+	quit = make(chan int, 2)
+	defer close(quit)
+	go func() {
+		waitSYS()
+		quit <- 0
+	}()
+	for count > 0 {
+		go func(count int) {
+			time.Sleep(60 * time.Second)
+			quit <- count + 1
+		}(count)
+		count = <- quit
+		if count == 0 {
+			conlog("Program exiting.\n")
+		} else {
+			if count > 15 {
+				fmt.Print("\n")
+				conlog("Timeout, OAuth exit.\n")
+				count = -1
+			}
+		}
+	}
 }
 
 func route(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	r.ParseForm()
-	fmt.Println(r.TLS != nil, r.Host, r.URL)
+	conlog(fmt.Sprintln(r.TLS != nil, r.Host, r.URL))
 	fmt.Println(r.Header)
 	path := r.URL.Path
 	fmt.Println("_" + path)
@@ -217,6 +248,10 @@ func route(w http.ResponseWriter, r *http.Request) {
     fmt.Println(query.Get("a"))
 	data := r.Form
 	fmt.Println(data)
+
+	// TODO
+
+	htmlOutput(w, r.Host, 200, nil)
 }
 
 func oauthroute(w http.ResponseWriter, r *http.Request) {
@@ -261,8 +296,8 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 			saveConfig(1, "refreshToken", rt)
 			err := saveConfig(1, "rtExpiredTime", rtet)
 			if err != nil {
-				conlog("  saving access token faild\n")
-				htmlOutput(w, "saving access token faild", 400, nil)
+				conlog("  saving access token failed\n")
+				htmlOutput(w, "saving access token failed", 400, nil)
 			} else {
 				//deviceIDs := listDevices()
 				//"thingList":[],"total":1 我列不出来暂不会自动处理
@@ -287,7 +322,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 			} else {
 				htmlOutput(w, "Success", 200, nil)
 				conlog("  Success\n")
-				quit<-1
+				quit <- 0
 			}
 		} else {
 			if query.Get("install") == "1" {
@@ -367,7 +402,7 @@ func listDevices() (string, error) {
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
-			conlog("  list device faild.\n")
+			conlog("  list device failed.\n")
 			return "", errors.New(body)
 		} else {
 			return body, nil
@@ -389,7 +424,7 @@ func getDeviceStatus(id int, deviceID string) (string, error) {
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
-			conlog("  get " + deviceID + " status faild.\n")
+			conlog("  get " + deviceID + " status failed.\n")
 			return "", errors.New(body)
 		} else {
 			status := readValueInString(string(body), "switch")
@@ -413,7 +448,7 @@ func setDeviceStatus(id int, deviceID string, status string) error {
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
-			conlog("  set " + deviceID + " status faild.\n")
+			conlog("  set " + deviceID + " status failed.\n")
 			return errors.New(body)
 		} else {
 			//status := readValueInString(string(body), "switch")
@@ -438,7 +473,7 @@ func RefreshToken(refreshToken string) error {
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
-			conlog("  Refresh token faild.\n")
+			conlog("  Refresh token failed.\n")
 			return errors.New(body)
 		} else {
 			conlog("  saving access token\n")
@@ -529,9 +564,13 @@ func validToken() bool {
 					return false
 				}
 			}
-			return true
+			_, err = listDevices()
+			if err != nil {
+				return false
+			} else {
+				return true
+			}
 		}
-		return true
 	}
 }
 func removeStrbefor(text string, pre string) string {
@@ -541,11 +580,41 @@ func removeStrbefor(text string, pre string) string {
 	return text
 }
 func readValueInString(text string, key string) string {
-	for strings.Index(text, key) > -1 {
-		key1 := text[strings.Index(text, key):]
-		key1 = key1[0:strings.Index(key1, "\"")]
+	key = "\"" + key + "\""
+	if strings.Index(text, key) > -1 {
+		value := text[(strings.Index(text, key) + len(key)):]
+		if strings.Index(value, ",") > -1 {
+			if strings.Index(value, ",") < strings.Index(value, "\"") {
+				value = value[0:strings.Index(value, ",")]
+				value = removeStrbefor(value, " ")
+				value = removeStrbefor(value, ":")
+			} else {
+				value = value[(strings.Index(value, "\"") + 1):]
+				value = value[0:strings.Index(value, "\"")]
+			}
+		} else {
+			if strings.Index(value, "\"") > -1 {
+				value = value[(strings.Index(value, "\"") + 1):]
+				value = value[0:strings.Index(value, "\"")]
+			} else {
+				value = value[0:strings.Index(value, "}")]
+				if strings.Index(value, "\n") > -1 {
+					value = value[0:strings.Index(value, "\n")]
+				}
+				value = removeStrbefor(value, " ")
+				value = removeStrbefor(value, ":")
+			}
+		}
+		return value
+	}
+	return ""
+}
+/*func readValueInString1(text string, key string) string {
+	for strings.Index(text, "\"" + key) > -1 {
+		key1 := text[strings.Index(text, "\"" + key):]
+		key1 = key1[1:strings.Index(key1, "\"")]
 		if key1 == key {
-			value := text[(strings.Index(text, key) + len(key) + 1):]
+			value := text[(strings.Index(text, "\"" + key) + len(key) + 2):]
 			if strings.Index(value, ",") > -1 {
 				if strings.Index(value, ",") < strings.Index(value, "\"") {
 					value = value[0:strings.Index(value, ",")]
@@ -570,10 +639,10 @@ func readValueInString(text string, key string) string {
 			}
 			return value
 		}
-		text = text[(strings.Index(text, key) + len(key)):]
+		text = text[(strings.Index(text, "\"" + key) + len(key)):]
 	}
 	return ""
-}
+}*/
 func ComputeHmac256(message string, secret string) string {
     key := []byte(secret)
     h := hmac.New(sha256.New, key)
