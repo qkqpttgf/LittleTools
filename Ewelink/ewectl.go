@@ -71,22 +71,26 @@ func main() {
 		// token 有效
 		//fmt.Print("valid token: ")
 		//fmt.Println(accessToken)
-		//a,_ := listDevices()
-		//fmt.Println(a)
-		dIDs, _ := readConfig(1, "deviceIDs")
-		deviceIDs := strings.Split(dIDs, ",")
-		for _, device := range deviceIDs {
-			status, _ := getDeviceStatus(1, device)
-			conlog("  " + device + ": " + status + "\n")
-		}
 		if operateLight != "" {
 			turnLight(targetLight, operateLight)
-		}
-		if startWeb {
-			startSrv()
-			stopSrv()
+		} else{
+			if startWeb {
+				startSrv()
+				stopSrv()
+			} else {
+				useage()
+				//a,_ := listDevices()
+				//fmt.Println(a)
+				dIDs, _ := readConfig(1, "deviceIDs")
+				deviceIDs := strings.Split(dIDs, ",")
+				for _, device := range deviceIDs {
+					status, _ := getDeviceStatus(1, device)
+					conlog("  " + device + ": " + status + "\n")
+				}
+			}
 		}
 	} else {
+		useage()
 		conlog(alertlog("no valid token, OAuth start.") + "\n")
 		startTmpSrv()
 		stopSrv()
@@ -95,8 +99,8 @@ func main() {
 	exec.Command("stty","-F","/dev/tty","cbreak","min","1").Run()
 	exec.Command("stty","-F","/dev/tty","-echo").Run()
 	defer exec.Command("stty","-F","/dev/tty","echo").Run()
-    b := make([]byte, 1)
-    os.Stdin.Read(b)*/
+	b := make([]byte, 1)
+	os.Stdin.Read(b)*/
 	//fmt.Println(a,b)
 }
 
@@ -104,8 +108,9 @@ func parseCommandLine() {
 	configFile := false
 	turnLight1 := false
 	softPath := ""
+	conlog("Commands:\n")
 	for argc, argv := range os.Args {
-		fmt.Printf(" %d: %v\n", argc, argv)
+		fmt.Printf("  %d: %v\n", argc, argv)
 		if argc == 0 {
 			softPath = argv
 			pos := strings.LastIndex(softPath, slash)
@@ -142,9 +147,19 @@ func parseCommandLine() {
 		}
 	}
 	if dbFilePath == "" {
-		dbFilePath = softPath + "config.db"
+		dbFilePath = softPath + "EweConfig.db"
 	}
-	conlog("Using datebase: " + dbFilePath + "\n")
+	conlog("Using datebase:\n  " + warnlog(dbFilePath) + "\n")
+}
+func useage() {
+	html := `Useage:
+  -c|-config databaseFile  set db
+  web                      start a web page (TODO)
+  turnon deviceID          turn on the device
+  turnoff deviceID         turn off the device
+`
+	//fmt.Print(html)
+	conlog(html)
 }
 
 func conlog(log string) {
@@ -154,6 +169,9 @@ func conlog(log string) {
 }
 func alertlog(log string) string {
 	return fmt.Sprintf("\033[91;5m%s\033[0m", log)
+}
+func warnlog(log string) string {
+	return fmt.Sprintf("\033[92;93m%s\033[0m", log)
 }
 func passlog(log string) string {
 	return fmt.Sprintf("\033[92;32m%s\033[0m", log)
