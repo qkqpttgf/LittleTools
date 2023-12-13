@@ -500,9 +500,9 @@ func RefreshToken(refreshToken string) error {
 			rt := readValueInString(string(body), "rt")
 			rtet := (time.Now().Unix() +  60 * 24 * 60 * 60) * 1000
 			saveConfig(1, "accessToken", accessToken)
-			saveConfig(1, "atExpiredTime", string(atet))
+			saveConfig(1, "atExpiredTime", strconv.FormatInt(atet, 10))
 			saveConfig(1, "refreshToken", rt)
-			return saveConfig(1, "rtExpiredTime", string(rtet))
+			return saveConfig(1, "rtExpiredTime", strconv.FormatInt(rtet, 10))
 		}
 	}
 }
