@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/hmac"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -47,21 +48,28 @@ type OauthApp struct {
 	redirectUrl string
 }
 var oauthapp OauthApp
-func appInit() {
-	oauthapp.appID, _ = readConfig(1, "appID")
-	oauthapp.appSecret, _ = readConfig(1, "appSecret")
-	oauthapp.redirectUrl, _ = readConfig(1, "appRedirect")
+func appInit(id int) {
+	oauthapp.appID, _ = readConfig(id, "appID")
+	oauthapp.appSecret, _ = readConfig(id, "appSecret")
+	oauthapp.redirectUrl, _ = readConfig(id, "appRedirect")
 }
 
 var quit chan int
 var accessToken string
 var slash string
+var isCmdWindow bool
 
 func main() {
 	conlog(passlog("Program Start") + "\n")
 	defer conlog(passlog("Program End") + "\n")
+	isCmdWindow = false
 	if runtime.GOOS == "windows" {
 		slash = "\\"
+		cmdVersion, _ := getCmdVersion()
+		//fmt.Println(cmdVersion)
+		if cmdVersion < 10 {
+			isCmdWindow = true
+		}
 	} else {
 		slash = "/"
 	}
@@ -69,16 +77,18 @@ func main() {
 	apiInit()
 	if validToken() {
 		// token 有效
-		//fmt.Print("valid token: ")
-		//fmt.Println(accessToken)
 		if operateLight != "" {
-			turnLight(targetLight, operateLight)
+			err := turnLight(targetLight, operateLight)
+			if err != nil {
+				conlog("  failed! " + fmt.Sprint(err) + "\n")
+			} else {
+				conlog("  success!\n")
+			}
 		} else{
 			if startWeb {
 				startSrv()
 				stopSrv()
 			} else {
-				useage()
 				//a,_ := listDevices()
 				//fmt.Println(a)
 				dIDs, _ := readConfig(1, "deviceIDs")
@@ -87,6 +97,7 @@ func main() {
 					status, _ := getDeviceStatus(1, device)
 					conlog("  " + device + ": " + status + "\n")
 				}
+				useage()
 			}
 		}
 	} else {
@@ -154,7 +165,7 @@ func parseCommandLine() {
 func useage() {
 	html := `Useage:
   -c|-config databaseFile  set db
-  web                      start a web page (TODO)
+  web                      start a web page
   turnon deviceID          turn on the device
   turnoff deviceID         turn off the device
 `
@@ -168,13 +179,25 @@ func conlog(log string) {
 	fmt.Print(strTime, log)
 }
 func alertlog(log string) string {
-	return fmt.Sprintf("\033[91;5m%s\033[0m", log)
+	if isCmdWindow {
+		return log
+	} else {
+		return fmt.Sprintf("\033[91;5m%s\033[0m", log)
+	}
 }
 func warnlog(log string) string {
-	return fmt.Sprintf("\033[92;93m%s\033[0m", log)
+	if isCmdWindow {
+		return log
+	} else {
+		return fmt.Sprintf("\033[92;93m%s\033[0m", log)
+	}
 }
 func passlog(log string) string {
-	return fmt.Sprintf("\033[92;32m%s\033[0m", log)
+	if isCmdWindow {
+		return log
+	} else {
+		return fmt.Sprintf("\033[92;32m%s\033[0m", log)
+	}
 }
 
 func startSrv() {
@@ -238,10 +261,10 @@ func waitOauth() {
 		quit <- 0
 	}()
 	for count > 0 {
-		go func(count int) {
+		go func() {
 			time.Sleep(60 * time.Second)
 			quit <- count + 1
-		}(count)
+		}()
 		count = <- quit
 		if count == 0 {
 			conlog("Program exiting.\n")
@@ -258,20 +281,125 @@ func waitOauth() {
 func route(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	r.ParseForm()
-	conlog(fmt.Sprintln(r.TLS != nil, r.Host, r.URL))
-	fmt.Println(r.Header)
+	//conlog(fmt.Sprintln(r.TLS != nil, r.Host, r.URL))
+	//fmt.Println(r.Header)
 	path := r.URL.Path
-	fmt.Println("_" + path)
-    query := r.URL.Query()
-    fmt.Println(query.Get("a"))
+	//fmt.Println("_" + path)
+//    query := r.URL.Query()
+    //fmt.Println(query.Get("a"))
 	data := r.Form
-	fmt.Println(data)
+	//fmt.Println(data)
 
-	// TODO
+	if path != "/" {
+		return
+	}
+	html := ""
+	admincookie1, err := r.Cookie("admin")
+	admincookie := ""
+	if err != nil {
+		admincookie = ""
+	} else {
+		admincookie = admincookie1.Value
+	}
+	if admincookie != "" {
+		if data.Get("device") != "" && (data.Get("action") == "on" || data.Get("action") == "off") {
+			httpCode := 200
+			err = turnLight(data.Get("device"), data.Get("action"))
+			if err != nil {
+				html += "  failed! " + fmt.Sprint(err) + "\n"
+				httpCode = 400
+			} else {
+				html += "  success!\n"
+			}
+			html += `<meta http-equiv="refresh" content="3;URL=">`
+			htmlOutput(w, html, httpCode, nil)
+		} else {
+			dIDs, _ := readConfig(1, "deviceIDs")
+			deviceIDs := strings.Split(dIDs, ",")
+			for _, device := range deviceIDs {
+				status, _ := getDeviceStatus(1, device)
+				//conlog("  " + device + ": " + status + "\n")
+				html += `
+<form name="` + device + `Form" method="post">
+	<input name="device" value="` + device + `" size="10" disabled>状态: ` + status + `
+	<button name="action" value="on"`
+				if status == "on" {
+					html += " disabled"
+				}
+				html += `>开</button>
+	<button name="action" value="off"`
+				if status == "off" {
+					html += " disabled"
+				}
+				html += `>关</button>
+</form>`
+			}
+			htmlOutput(w, html, 200, nil)
+		}
+	} else {
+		if data.Get("user") != "" && data.Get("pass") != "" {
+			adminuser, _ := readConfig(1, "user")
+			adminpass, _ := readConfig(1, "pass")
+			if data.Get("user") == adminuser && data.Get("pass") == adminpass {
+				t := int(time.Now().Unix() + 24 * 60 * 60)
+				md5 := passHashCookie(data.Get("user"), data.Get("pass"), t)
+				html = `
+<meta http-equiv="refresh" content="3;URL=` + path + `">
+Success
+<script>
+	var expd = new Date();
+	expd.setTime(` + fmt.Sprint(t) + `000);
+	var expires = "expires=" + expd.toGMTString();
+	document.cookie="admin=` + data.Get("user") + `:` + md5 + `@` + fmt.Sprint(t) + `; " + expires;
+</script>
+`
+				htmlOutput(w, html, 200, nil)
+			} else {
+				html = `<meta http-equiv="refresh" content="3;URL=` + path + `">Failed`
+				htmlOutput(w, html, 403, nil)
+			}
+		} else {
+			html = `登录
+<form action="" method="post" name="form1">
+	username: <input name="user" type="text"><br>
+	password: <input name="pass" type="password"><br>
+	<button>提交</button>
+<form>`
+			htmlOutput(w, html, 401, nil)
+		}
+	}
 
-	htmlOutput(w, r.Host, 200, nil)
 }
-
+func checkCookie(admin string) bool {
+	pos1 := strings.Index(admin, ":")
+	if pos1 < 0 {
+		return false
+	}
+	pos2 := strings.Index(admin, "@")
+	if pos2 < 0 {
+		return false
+	}
+	user := admin[0:pos1]
+	adminuser, _ := readConfig(1, "user")
+	if user != adminuser {
+		return false
+	}
+	md5 := admin[pos1+1:pos2]
+	t, _ := strconv.Atoi(admin[pos2+1:])
+	nt := int(time.Now().Unix())
+	if t < nt {
+		return false
+	}
+	adminpass, _ := readConfig(1, "pass")
+	if passHashCookie(user, adminpass, t) == md5 {
+		return true
+	} else {
+		return false
+	}
+}
+func passHashCookie(u string, p string, t int) string {
+	return fmt.Sprintf("%x", md5.Sum([]byte(u + "@" + p + "(" + fmt.Sprint(t))))
+}
 func oauthroute(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	r.ParseForm()
@@ -281,23 +409,23 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	//fmt.Println("_" + path)
     query := r.URL.Query()
     //fmt.Println(query.Get("a"))
-	//data := r.Form
+	data := r.Form
 	//fmt.Println(data)
 	//-------------------------
 	if path != "/" {
 		return
-	} 
+	}
 	if query.Get("code") != "" {
 		// 有code
 		conlog("  received a code\n")
-		data := "{\"code\":\"" + query.Get("code") + "\", \"redirectUrl\":\"" + oauthapp.redirectUrl + "\", \"grantType\":\"authorization_code\"}"
+		data1 := "{\"code\":\"" + query.Get("code") + "\", \"redirectUrl\":\"" + oauthapp.redirectUrl + "\", \"grantType\":\"authorization_code\"}"
 		head := make(map[string]string)
 		head["X-CK-Appid"] = oauthapp.appID
 		head["Content-Type"] = "application/json"
-		head["Authorization"] = "Sign " + ComputeHmac256(data, oauthapp.appSecret)
+		head["Authorization"] = "Sign " + ComputeHmac256(data1, oauthapp.appSecret)
 		head["Host"] = ewelinkapi.host
 
-		res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.oauthToken, data, head, false, false)
+		res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.oauthToken, data1, head)
 		if err != nil {
 			htmlOutput(w, fmt.Sprint(err), 400, nil)
 		} else {
@@ -331,7 +459,6 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if query.Get("install") == "2" {
-			data := r.Form
 			// 只处理1个设备，多个设备以后再说
 			err := saveConfig(1, "deviceIDs", data.Get("deviceID"))
 			if err != nil {
@@ -344,7 +471,6 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if query.Get("install") == "1" {
-				data := r.Form
 				saveConfig(1, "appID", data.Get("appID"))
 				saveConfig(1, "appSecret", data.Get("appSecret"))
 				err := saveConfig(1, "appRedirect", data.Get("redirectUrl"))
@@ -353,7 +479,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 					htmlOutput(w, html, 400, nil)
 				} else {
 					conlog("  redirecting to Ewelink\n")
-					appInit()
+					appInit(1)
 					time1 := time.Now().Unix() * 1000
 					signstr := ComputeHmac256(oauthapp.appID + "_" + fmt.Sprint(time1), oauthapp.appSecret)
 					url := "https://c2ccdn.coolkit.cc/oauth/index.html" +
@@ -376,8 +502,11 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				fmt.Print("\r")
-				conlog("  OAuth Page Start\n")
-				html := `
+				pass, _ := readConfig(1, "pass")
+				//fmt.Println(pass)
+				if pass != "" {
+					conlog("  OAuth Page Start\n")
+					html := `
 1. 在 https://dev.ewelink.cc/#/console 登录，申请成为开发者（可能要等几天）<br>
 2. 新建一个应用（个人开发者只能创建一个），将跳转地址设为下面 Redirect URL 中的url（其实就是当前页面）<br>
 3. 将 APPID 与 APP SECRET 填入下方，点击按钮提交给程序
@@ -391,19 +520,44 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	document.form1.redirectUrl.value = location.href;
 </script>
 `
-				htmlOutput(w, html, 201, nil)
+					htmlOutput(w, html, 201, nil)
+				} else {
+					if data.Get("user") != "" && data.Get("pass") != "" {
+						saveConfig(1, "user", data.Get("user"))
+						err := saveConfig(1, "pass", data.Get("pass"))
+						if err != nil {
+							conlog("  Set admin failed\n")
+							html := `failed
+<meta http-equiv="refresh" content="5;URL=">
+`
+							htmlOutput(w, html, 400, nil)
+						} else {
+							conlog("  Setting admin\n")
+							html := `Success
+<meta http-equiv="refresh" content="3;URL=">
+`
+							htmlOutput(w, html, 201, nil)
+						}
+					} else {
+						conlog("  Please set admin first\n")
+						html := `
+Set admin user:
+<form action="" method="post" name="form1">
+	username: <input name="user" type="text"><br>
+	password: <input name="pass" type="password"><br>
+	<button>提交</button>
+<form>
+`
+						htmlOutput(w, html, 201, nil)
+					}
+				}
 			}
 		}
 	}
 }
 
-func turnLight(deviceID string, turn string) {
-	err := setDeviceStatus(1, deviceID, turn)
-	if err != nil {
-		conlog("  failed! " + fmt.Sprint(err) + "\n")
-	} else {
-		conlog("  success!\n")
-	}
+func turnLight(deviceID string, turn string) error {
+	return setDeviceStatus(1, deviceID, turn)
 }
 func listDevices() (string, error) {
 	head := make(map[string]string)
@@ -412,7 +566,7 @@ func listDevices() (string, error) {
 	head["Content-Type"] = "application/json"
 	head["Authorization"] = "Bearer " + accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing"
-	res, err := curl("GET", url, "", head, false, false)
+	res, err := curl("GET", url, "", head)
 	if err != nil {
 		return "", err
 	} else {
@@ -434,7 +588,7 @@ func getDeviceStatus(id int, deviceID string) (string, error) {
 	head["Content-Type"] = "application/json"
 	head["Authorization"] = "Bearer " + accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status" + "?type=1&id=" + deviceID + "&params=switch"
-	res, err := curl("GET", url, "", head, false, false)
+	res, err := curl("GET", url, "", head)
 	if err != nil {
 		return "", err
 	} else {
@@ -458,7 +612,7 @@ func setDeviceStatus(id int, deviceID string, status string) error {
 	head["Authorization"] = "Bearer " + accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status"
 	data := "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
-	res, err := curl("POST", url, data, head, false, false)
+	res, err := curl("POST", url, data, head)
 	if err != nil {
 		return err
 	} else {
@@ -482,7 +636,7 @@ func RefreshToken(refreshToken string) error {
 	head["Content-Type"] = "application/json"
 	head["Authorization"] = "Bearer " + accessToken
 
-	res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.refreshToken, data, head, false, false)
+	res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.refreshToken, data, head)
 	if err != nil {
 		return err
 	} else {
@@ -526,14 +680,23 @@ func sqlite(str string) (string, error) {
 	if err = cmd.Wait(); err != nil {
 		return "w", err
 	}
+	//fmt.Println(result, str)
 	return result, nil
 }
 func saveConfig(id int, key string, value string) error {
-	_, err := sqlite("update data set " + key + "=\"" + value + "\" where id=" + strconv.Itoa(id) + ";")
+	table := "data"
+	if key == "user" || key == "pass" {
+		table = "admin"
+	}
+	_, err := sqlite("update " + table + " set " + key + "=\"" + value + "\" where id=" + strconv.Itoa(id) + ";")
 	return err
 }
 func readConfig(id int, key string) (string, error) {
-	return sqlite("select " + key + " from data where id=" + strconv.Itoa(id) + ";" )
+	table := "data"
+	if key == "user" || key == "pass" {
+		table = "admin"
+	}
+	return sqlite("select " + key + " from " + table + " where id=" + strconv.Itoa(id) + ";" )
 }
 /*
 admin (id user pass)
@@ -544,6 +707,7 @@ func validToken() bool {
 	if err != nil {
 		sqlite("create table admin (id integer primary key, user char(20), pass char(20));")
 		sqlite("create table data (id integer primary key, appID text, appSecret text, appRedirect text, accessToken text, atExpiredTime text, refreshToken text, rtExpiredTime text, deviceIDs text);")
+		sqlite("insert into admin (id) values (1);")
 		sqlite("insert into data (id) values (1);")
 		return false
 	} else {
@@ -560,7 +724,7 @@ func validToken() bool {
 			if dIDs == "" {
 				return false
 			}
-			appInit()
+			appInit(1)
 			//fmt.Println("_" + accessToken + "_")
 			atExpiredTime, _ := readConfig(1, "atExpiredTime")
 			if len(atExpiredTime) > 3 {
@@ -627,40 +791,6 @@ func readValueInString(text string, key string) string {
 	}
 	return ""
 }
-/*func readValueInString1(text string, key string) string {
-	for strings.Index(text, "\"" + key) > -1 {
-		key1 := text[strings.Index(text, "\"" + key):]
-		key1 = key1[1:strings.Index(key1, "\"")]
-		if key1 == key {
-			value := text[(strings.Index(text, "\"" + key) + len(key) + 2):]
-			if strings.Index(value, ",") > -1 {
-				if strings.Index(value, ",") < strings.Index(value, "\"") {
-					value = value[0:strings.Index(value, ",")]
-					value = removeStrbefor(value, " ")
-					value = removeStrbefor(value, ":")
-				} else {
-					value = value[(strings.Index(value, "\"") + 1):]
-					value = value[0:strings.Index(value, "\"")]
-				}
-			} else {
-				if strings.Index(value, "\"") > -1 {
-					value = value[(strings.Index(value, "\"") + 1):]
-					value = value[0:strings.Index(value, "\"")]
-				} else {
-					value = value[0:strings.Index(value, "}")]
-					if strings.Index(value, "\n") > -1 {
-						value = value[0:strings.Index(value, "\n")]
-					}
-					value = removeStrbefor(value, " ")
-					value = removeStrbefor(value, ":")
-				}
-			}
-			return value
-		}
-		text = text[(strings.Index(text, "\"" + key) + len(key)):]
-	}
-	return ""
-}*/
 func ComputeHmac256(message string, secret string) string {
     key := []byte(secret)
     h := hmac.New(sha256.New, key)
@@ -679,13 +809,46 @@ func htmlOutput(w http.ResponseWriter, body string, code int, head map[string]st
 ` + body
 	w.Write([]byte(body))
 }
+func getCmdVersion() (int, error) {
+	//fmt.Println(str)
+	result := ""
+	version := 0
+	cmd := exec.Command("cmd.exe", "-v")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return -1, err
+	}
+	if err = cmd.Start(); err != nil {
+		return -2, err
+	}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		result += scanner.Text()
+	}
+	if err = cmd.Wait(); err != nil {
+		return -3, err
+	}
+	//fmt.Println(result, str)
+	if result != "" {
+		result = result[strings.Index(result, "["):]
+		result = result[strings.Index(result, " ")+1:strings.Index(result, ".")]
+		version, err = strconv.Atoi(result)
+		if err != nil {
+			return -5, err
+		} else {
+			return version, nil
+		}
+	} else {
+		return -4, errors.New("Empty")
+	}
+}
 
 type HttpResult struct {
 	StatusCode int
 	Header http.Header
 	Body string
 }
-func curl(method string, url string, data string, header map[string]string, returnHeader bool, location bool) (HttpResult, error) {
+func curl(method string, url string, data string, header map[string]string) (HttpResult, error) {
 	var result HttpResult
 	var err error
 	//fmt.Println("初始", result.StatusCode)
