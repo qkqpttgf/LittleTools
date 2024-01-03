@@ -176,7 +176,7 @@ func useage() {
 func conlog(log string) {
 	layout := "[2006-01-02 15:04:05.000] "
 	strTime := (time.Now()).Format(layout)
-	fmt.Print(strTime, log)
+	fmt.Print("\r", strTime, log)
 }
 func alertlog(log string) string {
 	if isCmdWindow {
@@ -207,7 +207,8 @@ func startSrv() {
 		conlog("Server start failed\n")
 	} else {
 		conlog("Server started\n")
-		waitSYS()
+		//waitSYS()
+		waitWeb()
 	}
 }
 func startTmpSrv() {
@@ -235,9 +236,8 @@ func listenHttp(bindIP string, port int) *http.Server {
 	return srv
 }
 func stopSrv() {
-	var err error
 	if Server != nil {
-		err = Server.Close()
+		err := Server.Close()
 		if err != nil {
 			conlog(fmt.Sprint(err, "\n"))
 		} else {
@@ -252,6 +252,46 @@ func waitSYS() {
 	<- sysSignalQuit
 	fmt.Print("\n")
 }
+func waitWeb() {
+	count := 0
+	quit = make(chan int, 2)
+	defer close(quit)
+	maxcount := 5
+	go func() {
+		waitSYS()
+		quit <- -1
+	}()
+	for count > -1 {
+		if count == -1 {
+			conlog("Program exiting.\n")
+		} else {
+			if count > 1 {
+				fmt.Print(".")
+				if count > maxcount {
+					count = 0
+					//fmt.Print("count")
+				}
+			} else {
+				fmt.Print("\r")
+				str := "Waiting visitor"
+				for count1 := count; count1 < maxcount + len(str) + 1; count1++ {
+					fmt.Print(" ")
+				}
+				fmt.Print("\r")
+				if count == 1 {
+					fmt.Print(str)
+				}
+			}
+			go func(c int) {
+				time.Sleep(1 * time.Second)
+				if c == count {
+					quit <- count + 1
+				}
+			}(count)
+			count = <- quit
+		}
+	}
+}
 func waitOauth() {
 	count := 1
 	quit = make(chan int, 2)
@@ -261,11 +301,6 @@ func waitOauth() {
 		quit <- 0
 	}()
 	for count > 0 {
-		go func() {
-			time.Sleep(60 * time.Second)
-			quit <- count + 1
-		}()
-		count = <- quit
 		if count == 0 {
 			conlog("Program exiting.\n")
 		} else {
@@ -275,20 +310,31 @@ func waitOauth() {
 				count = -1
 			}
 		}
+		go func() {
+			time.Sleep(60 * time.Second)
+			quit <- count + 1
+		}()
+		count = <- quit
 	}
 }
 
 func route(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	quit <- 0
 	r.ParseForm()
-	//conlog(fmt.Sprintln(r.TLS != nil, r.Host, r.URL))
+	//r.TLS != nil
+	conlog(warnlog(fmt.Sprintln(r.Method, r.URL)))
+	//conlog(warnlog(fmt.Sprintln(r.Method, r.Host, r.URL, r.Header.Get("X-Real-IP"), r.RemoteAddr)))
+	fmt.Println(r)
 	//fmt.Println(r.Header)
 	path := r.URL.Path
 	//fmt.Println("_" + path)
 //    query := r.URL.Query()
     //fmt.Println(query.Get("a"))
 	data := r.Form
-	//fmt.Println(data)
+	if r.Method == "POST" {
+		fmt.Println(data)
+	}
 
 	if path != "/" {
 		return
