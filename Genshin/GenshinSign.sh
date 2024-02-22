@@ -17,14 +17,14 @@ ykh='}'
 function getjsonvalue {
   # $1 json string
   # $2 key
-  value=$(echo "$1" | awk -F "$2\":" '{print $2}')
+  value=$(echo "$1" | awk -F "\"$2\":" '{print $2}')
   if [ g"${value:0:1}" = g"\"" ]; then
     value=${value#*${syh}}
     value=${value%%${syh}*}
   else
     value=${value%%,*}
+    value=${value%%${ykh}*}
   fi
-  # | awk -F "," '{print $1}'`
   value=${value%${ykh}*}
   echo ${value}
 }
@@ -76,8 +76,9 @@ function FTQQ() {
 }
 
 function signCheck {
-  url="${checkSignUrl}?act_id="${act_id}"&region=${region}&uid=${game_uid}"
-  checkResult=$(curl -s "${url}" -H "Cookie: ${cookie}" -w %{http_code})
+  url="${checkSignUrl}?act_id=${act_id}&region=${region}&uid=${game_uid}"
+  checkResult=$(curl -s "${url}" -H "Cookie: ${cookie}" -H "x-rpc-signgame: ${signgame}" -w %{http_code})
+  #echo ${checkResult}
   checkcode=${checkResult:0-3}
   if [ g"${checkcode}" = g"200" ]; then
     is_sign=$(getjsonvalue "${checkResult}" "is_sign")
@@ -105,18 +106,27 @@ function sign {
   random1="818465" #随机6个字母与数字
   md51=$(echo -n "salt=${salt1}&t=${time1}&r=${random1}" | md5sum)
   md51=${md51%% *}
-  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.36.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.36.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -w %{http_code})
+  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.36.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.36.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -H "x-rpc-signgame: ${signgame}" -w %{http_code})
+  #echo ${signResult}
   signcode=${signResult:0-3}
   if [ g"${signcode}" = g"200" ]; then
     signRetcode=$(getjsonvalue "${signResult}" "retcode")
     if [ g"${signRetcode}" = g"0" ]; then
-      GT=$(getjsonvalue "${signResult}" "gt")
-      if [ g"${GT}" != g"" ]; then
-        echo " Error，有验证码"
-        #echo " E${signResult}"
+      #GT=$(getjsonvalue "${signResult}" "gt")
+      #if [ g"${GT}" != g"" ]; then
+      success=$(getjsonvalue "${signResult}" "success")
+      if [ g"${success}" != g"0" ]; then
+        risk=$(getjsonvalue "${signResult}" "is_risk")
+        #echo ${risk}
+        if [ g"${risk}" = g"true" ]; then
+          echo " Error，有验证码"
+        else
+          echo " E${signResult}"
+        fi
       else
         # 签到成功
         #getjsonvalue "${signResult}" "message"
+        #echo "${region_name} ${level}级的 ${nickname}(${game_uid}): ${signResult}" >> /root/mhysign.log
         echo "OK"
       fi
     else
@@ -182,15 +192,22 @@ function startSign {
           msg="${msg}\n原神"
           if [ g"${configRegion}" = g"cn" ]; then
             getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn"
-            checkSignUrl="https://api-takumi.mihoyo.com/event/bbs_sign_reward/info"
-            signUrl="https://api-takumi.mihoyo.com/event/bbs_sign_reward/sign"
-            act_id="e202009291139501"
+            #checkSignUrl="https://api-takumi.mihoyo.com/event/bbs_sign_reward/info"
+            #signUrl="https://api-takumi.mihoyo.com/event/bbs_sign_reward/sign"
+            #act_id="e202009291139501"
+            checkSignUrl="https://api-takumi.mihoyo.com/event/luna/info"
+            signUrl="https://api-takumi.mihoyo.com/event/luna/sign"
+            act_id="e202311201442471"
+            signgame="hk4e"
           fi
           if [ g"${configRegion}" = g"global" ]; then
             getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hk4e_global"
-            checkSignUrl="https://hk4e-api-os.mihoyo.com/event/sol/info"
-            signUrl="https://hk4e-api-os.mihoyo.com/event/sol/sign"
+            #checkSignUrl="https://hk4e-api-os.mihoyo.com/event/sol/info"
+            #signUrl="https://hk4e-api-os.mihoyo.com/event/sol/sign"
+            checkSignUrl="https://sg-hk4e-api.hoyolab.com/event/sol/info"
+            signUrl="https://sg-hk4e-api.hoyolab.com/event/sol/sign"
             act_id="e202102251931481"
+            signgame="hk4e"
           fi
         fi
         if [ $i1 -eq 1 ]; then
@@ -201,15 +218,17 @@ function startSign {
             checkSignUrl="https://api-takumi.mihoyo.com/event/luna/info"
             signUrl="https://api-takumi.mihoyo.com/event/luna/sign"
             act_id="e202304121516551"
+            signgame="hkrpg"
           fi
           if [ g"${configRegion}" = g"global" ]; then
-          #  getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
+            #  getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
+            #  checkSignUrl="https://api-os-takumi.mihoyo.com/event/luna/info"
+            #  signUrl="https://api-os-takumi.mihoyo.com/event/luna/sign"
             getRoleUrl="https://sg-public-api.hoyolab.com/binding/api/getUserGameRolesByLtoken?game_biz=hkrpg_global"
-          #  checkSignUrl="https://api-os-takumi.mihoyo.com/event/luna/info"
             checkSignUrl="https://sg-public-api.hoyolab.com/event/luna/info"
-          #  signUrl="https://api-os-takumi.mihoyo.com/event/luna/sign"
             signUrl="https://sg-public-api.hoyolab.com/event/luna/sign"
             act_id="e202303301540311"
+            signgame="hkrpg"
           fi
         fi
         if [ g"${getRoleUrl}" = g"" ]; then
