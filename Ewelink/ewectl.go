@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha256"
@@ -25,6 +26,7 @@ var dbFilePath string
 var operateLight string
 var targetLight string
 var startWeb bool
+var startOauth bool
 var Server *http.Server
 
 type EwelinkAPI struct {
@@ -37,7 +39,7 @@ type EwelinkAPI struct {
 var ewelinkapi EwelinkAPI
 func apiInit() {
 	ewelinkapi.scheme = "https://"
-	ewelinkapi.host = "cn-apia.coolkit.cn"
+	ewelinkapi.host = "cn-apia.coolkit.cn" // 中国区
 	ewelinkapi.oauthToken = "/v2/user/oauth/token"
 	ewelinkapi.refreshToken = "/v2/user/refresh"
 	ewelinkapi.viewStatus = "/v2/device/thing/status"
@@ -46,16 +48,29 @@ type OauthApp struct {
 	appID string
 	appSecret string
 	redirectUrl string
+	accessToken string
 }
 var oauthapp OauthApp
+func tokenInit(id int) bool {
+	oauthapp.accessToken, _ = readConfig("token", "accessToken", id)
+	id_client_string, _ := readConfig("token", "clientID", id)
+	id_client, _ := strconv.Atoi(id_client_string)
+	//fmt.Println("client id ", id_client)
+	appInit(id_client)
+	if validToken(id) {
+		return true
+	} else {
+		return false
+	}
+}
 func appInit(id int) {
-	oauthapp.appID, _ = readConfig(id, "appID")
-	oauthapp.appSecret, _ = readConfig(id, "appSecret")
-	oauthapp.redirectUrl, _ = readConfig(id, "appRedirect")
+	oauthapp.appID, _ = readConfig("client", "appID", id)
+	oauthapp.appSecret, _ = readConfig("client", "appSecret", id)
+	oauthapp.redirectUrl, _ = readConfig("client", "appRedirect", id)
 }
 
 var quit chan int
-var accessToken string
+//var accessToken string
 var slash string
 var isCmdWindow bool
 
@@ -73,10 +88,8 @@ func main() {
 	} else {
 		slash = "/"
 	}
-	parseCommandLine()
-	apiInit()
-	if validToken() {
-		// token 有效
+	if parseCommandLine() {
+		apiInit()
 		if operateLight != "" {
 			err := turnLight(targetLight, operateLight)
 			if err != nil {
@@ -84,27 +97,45 @@ func main() {
 			} else {
 				conlog("  success!\n")
 			}
-		} else{
-			if startWeb {
-				startSrv()
-				stopSrv()
-			} else {
+			return
+		}
+		if startWeb {
+			startSrv()
+			stopSrv()
+			return
+		}
+		if startOauth {
+			startTmpSrv()
+			stopSrv()
+			return
+		}
+		useage()
 				//a,_ := listDevices()
 				//fmt.Println(a)
-				dIDs, _ := readConfig(1, "deviceIDs")
-				deviceIDs := strings.Split(dIDs, ",")
-				for _, device := range deviceIDs {
-					status, _ := getDeviceStatus(1, device)
-					conlog("  " + device + ": " + status + "\n")
+		dIDs, _ := readConfig("device", "id,deviceID", 0)
+		//fmt.Println(dIDs)
+		if dIDs != "" {
+			deviceIDs := strings.Split(dIDs, "\n")
+			for _, device1 := range deviceIDs {
+				id := device1[0:strings.Index(device1, "|")]
+				device := device1[strings.Index(device1, "|")+1:]
+				//fmt.Println(device)
+				status, err := getDeviceStatus(device)
+				if err != nil {
+					status = fmt.Sprint(err)
 				}
-				useage()
+				conlog(id + ", " + device + ": " + status + "\n")
 			}
+		} else {
+			conlog(alertlog("No device, OAuth start.") + "\n")
+			startTmpSrv()
+			stopSrv()
 		}
+		return
 	} else {
+		conlog(alertlog("command error.") + "\n")
 		useage()
-		conlog(alertlog("no valid token, OAuth start.") + "\n")
-		startTmpSrv()
-		stopSrv()
+		return
 	}
 	/*fmt.Printf("Press any key to exit...\n")
 	exec.Command("stty","-F","/dev/tty","cbreak","min","1").Run()
@@ -115,7 +146,7 @@ func main() {
 	//fmt.Println(a,b)
 }
 
-func parseCommandLine() {
+func parseCommandLine() bool {
 	configFile := false
 	turnLight1 := false
 	softPath := ""
@@ -133,6 +164,10 @@ func parseCommandLine() {
 		}
 		if argv == "web" {
 			startWeb = true
+			continue
+		}
+		if argv == "add" {
+			startOauth = true
 			continue
 		}
 		if len(argv) > 4 {
@@ -157,17 +192,56 @@ func parseCommandLine() {
 			continue
 		}
 	}
+	if operateLight != "" && operateLight != "on" && operateLight != "off" {
+		conlog(alertlog("invalid operate: \"" + operateLight + "\"\n"))
+		return false
+	}
+	if operateLight != "" && targetLight == "" {
+		conlog(alertlog("turn empty light\n"))
+		return false
+	}
+	todoNum := 0
+	if operateLight != "" {
+		todoNum++
+	}
+	if startWeb {
+		todoNum++
+	}
+	if startOauth {
+		todoNum++
+	}
+	if todoNum > 1 {
+		conlog(alertlog("please do one thing in one time\n"))
+		return false
+	}
 	if dbFilePath == "" {
 		dbFilePath = softPath + "EweConfig.db"
 	}
 	conlog("Using datebase:\n  " + warnlog(dbFilePath) + "\n")
+	_, err := os.Stat(dbFilePath)
+	if err != nil {
+		conlog("db file not found, it will be create.\n")
+		sqlite("create table admin (id integer primary key, user char(20), pass char(20));")
+		sqlite("create table client (id integer primary key, appID text, appSecret text, appRedirect text);")
+		sqlite("create table token (id integer primary key, clientID text, accessToken text, atExpiredTime text, refreshToken text, rtExpiredTime text);")
+		_, err = sqlite("create table device (id integer primary key, deviceID text, tokenID text);")
+		if err != nil {
+			conlog(alertlog("create fail\n"))
+		} else {
+			conlog("create done.\n")
+		}
+	}
+	return true
 }
 func useage() {
 	html := `Useage:
-  -c|-config databaseFile  set db
-  web                      start a web page
-  turnon deviceID          turn on the device
-  turnoff deviceID         turn off the device
+  -c|-config PathofFile  set path of database
+  add                    start a web page to add device
+  web                    start a web page
+  turnon id              turn on the device
+  turnoff id             turn off the device
+         (the device ID string or order number in datebase)
+
 `
 	//fmt.Print(html)
 	conlog(html)
@@ -219,7 +293,6 @@ func startTmpSrv() {
 	} else {
 		conlog("OAuth Server started\n")
 		conlog("Please visit http://{YourIP}:60576/ in a browser.\n")
-		fmt.Print("Waiting...")
 		waitOauth()
 	}
 }
@@ -263,13 +336,12 @@ func waitWeb() {
 	}()
 	for count > -1 {
 		if count == -1 {
-			conlog("Program exiting.\n")
+			conlog("Program exiting\n")
 		} else {
 			if count > 1 {
 				fmt.Print(".")
 				if count > maxcount {
 					count = 0
-					//fmt.Print("count")
 				}
 			} else {
 				fmt.Print("\r")
@@ -293,7 +365,10 @@ func waitWeb() {
 	}
 }
 func waitOauth() {
-	count := 1
+	fmt.Print("Waiting...")
+	defer conlog("Oauth exiting.\n")
+	count := 1 // 0，结束，1，初始，2，网页访问续时间
+	expireSecond := 10 * 60
 	quit = make(chan int, 2)
 	defer close(quit)
 	go func() {
@@ -301,20 +376,22 @@ func waitOauth() {
 		quit <- 0
 	}()
 	for count > 0 {
-		if count == 0 {
-			conlog("Program exiting.\n")
-		} else {
-			if count > 15 {
-				fmt.Print("\n")
-				conlog("Timeout, OAuth exit.\n")
-				count = -1
-			}
-		}
+		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
-			time.Sleep(60 * time.Second)
-			quit <- count + 1
+			time.Sleep(time.Second * time.Duration(expireSecond))
+			select {
+				case <- ctx.Done() :
+					return
+				default :
+					if count == 1 {
+						fmt.Print("\n")
+					}
+					conlog("Timeout\n")
+					quit <- 0
+			}
 		}()
 		count = <- quit
+		cancel();
 	}
 }
 
@@ -340,17 +417,10 @@ func route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	html := ""
-	admincookie1, err := r.Cookie("admin")
-	admincookie := ""
-	if err != nil {
-		admincookie = ""
-	} else {
-		admincookie = admincookie1.Value
-	}
-	if admincookie != "" {
+	if checkAdminShowLoginPage(w, r) {
 		if data.Get("device") != "" && (data.Get("action") == "on" || data.Get("action") == "off") {
 			httpCode := 200
-			err = turnLight(data.Get("device"), data.Get("action"))
+			err := turnLight(data.Get("device"), data.Get("action"))
 			if err != nil {
 				html += "  failed! " + fmt.Sprint(err) + "\n"
 				httpCode = 400
@@ -360,21 +430,29 @@ func route(w http.ResponseWriter, r *http.Request) {
 			html += `<meta http-equiv="refresh" content="3;URL=">`
 			htmlOutput(w, html, httpCode, nil)
 		} else {
-			dIDs, _ := readConfig(1, "deviceIDs")
-			deviceIDs := strings.Split(dIDs, ",")
-			for _, device := range deviceIDs {
-				status, _ := getDeviceStatus(1, device)
+			dIDs, _ := readConfig("device", "id,deviceID", 0)
+			//fmt.Println(dIDs)
+			deviceIDs := strings.Split(dIDs, "\n")
+			for _, device1 := range deviceIDs {
+				id := device1[0:strings.Index(device1, "|")]
+				device := device1[strings.Index(device1, "|")+1:]
+				//fmt.Println(device)
+				status, err := getDeviceStatus(device)
 				//conlog("  " + device + ": " + status + "\n")
+				if err != nil {
+					status = fmt.Sprint(err)
+				}
 				html += `
 <form name="` + device + `Form" method="post">
-	<input name="device" value="` + device + `" size="10" disabled>状态: ` + status + `
+	` + id + `,
+	<input name="device" value="` + device + `" size="10" readonly>状态: ` + status + `
 	<button name="action" value="on"`
-				if status == "on" {
+				if status != "off" {
 					html += " disabled"
 				}
 				html += `>开</button>
 	<button name="action" value="off"`
-				if status == "off" {
+				if status != "on" {
 					html += " disabled"
 				}
 				html += `>关</button>
@@ -382,11 +460,69 @@ func route(w http.ResponseWriter, r *http.Request) {
 			}
 			htmlOutput(w, html, 200, nil)
 		}
+	}
+}
+
+func checkCookie(admin string) bool {
+	pos1 := strings.Index(admin, ":")
+	if pos1 < 0 {
+		return false
+	}
+	pos2 := strings.Index(admin, "@")
+	if pos2 < 0 {
+		return false
+	}
+	user := admin[0:pos1]
+	//adminuser, _ := readConfig("admin", "user", 1)
+	//if user != adminuser {
+	//	return false
+	//}
+	userid := findConfig("admin", "user", user)
+	if userid[0] < 0 {
+		return false
+	}
+	md5 := admin[pos1+1:pos2]
+	t, _ := strconv.Atoi(admin[pos2+1:])
+	nt := int(time.Now().Unix())
+	if t < nt {
+		return false
+	}
+	adminpass, _ := readConfig("admin", "pass", userid[0])
+	if passHashCookie(user, adminpass, t) == md5 {
+		return true
 	} else {
-		if data.Get("user") != "" && data.Get("pass") != "" {
-			adminuser, _ := readConfig(1, "user")
-			adminpass, _ := readConfig(1, "pass")
-			if data.Get("user") == adminuser && data.Get("pass") == adminpass {
+		return false
+	}
+}
+func passHashCookie(u string, p string, t int) string {
+	return fmt.Sprintf("%x", md5.Sum([]byte(u + "@" + p + "(" + fmt.Sprint(t))))
+}
+func checkAdminShowLoginPage(w http.ResponseWriter, r *http.Request) bool {
+	r.ParseForm()
+	//fmt.Println(r)
+	path := r.URL.Path
+	data := r.Form
+
+	html := ""
+	admincookie1, err := r.Cookie("admin")
+	admincookie := ""
+	if err != nil {
+		admincookie = ""
+	} else {
+		admincookie = admincookie1.Value
+	}
+	if admincookie != "" {
+		validCookie := checkCookie(admincookie)
+		if validCookie {
+			return true
+		}
+	}
+	if r.Method == "POST" && data.Get("user") != "" && data.Get("pass") != "" {
+		//adminuser, _ := readConfig("admin", "user", 1)
+		id := findConfig("admin", "user", data.Get("user"))
+		if id[0] > 0 {
+			adminpass, _ := readConfig("admin", "pass", id[0])
+			if data.Get("pass") == adminpass {
 				t := int(time.Now().Unix() + 24 * 60 * 60)
 				md5 := passHashCookie(data.Get("user"), data.Get("pass"), t)
 				html = `
@@ -400,53 +536,28 @@ Success
 </script>
 `
 				htmlOutput(w, html, 200, nil)
-			} else {
-				html = `<meta http-equiv="refresh" content="3;URL=` + path + `">Failed`
-				htmlOutput(w, html, 403, nil)
 			}
 		} else {
-			html = `登录
+			html = `<meta http-equiv="refresh" content="3;URL=` + path + `">Failed`
+			htmlOutput(w, html, 403, nil)
+		}
+		return false
+	} else {
+		html = `登录
 <form action="" method="post" name="form1">
 	username: <input name="user" type="text"><br>
 	password: <input name="pass" type="password"><br>
 	<button>提交</button>
-<form>`
-			htmlOutput(w, html, 401, nil)
-		}
+<form>
+<script>
+	document.form1.user.focus();
+</script>`
+		htmlOutput(w, html, 401, nil)
 	}
-
-}
-func checkCookie(admin string) bool {
-	pos1 := strings.Index(admin, ":")
-	if pos1 < 0 {
-		return false
-	}
-	pos2 := strings.Index(admin, "@")
-	if pos2 < 0 {
-		return false
-	}
-	user := admin[0:pos1]
-	adminuser, _ := readConfig(1, "user")
-	if user != adminuser {
-		return false
-	}
-	md5 := admin[pos1+1:pos2]
-	t, _ := strconv.Atoi(admin[pos2+1:])
-	nt := int(time.Now().Unix())
-	if t < nt {
-		return false
-	}
-	adminpass, _ := readConfig(1, "pass")
-	if passHashCookie(user, adminpass, t) == md5 {
-		return true
-	} else {
-		return false
-	}
-}
-func passHashCookie(u string, p string, t int) string {
-	return fmt.Sprintf("%x", md5.Sum([]byte(u + "@" + p + "(" + fmt.Sprint(t))))
+	return false
 }
 func oauthroute(w http.ResponseWriter, r *http.Request) {
+	quit <- 2
 	defer r.Body.Close()
 	r.ParseForm()
 	//fmt.Println(r.TLS != nil, r.Host, r.URL)
@@ -461,160 +572,399 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 	if path != "/" {
 		return
 	}
-	if query.Get("code") != "" {
-		// 有code
-		conlog("  received a code\n")
-		data1 := "{\"code\":\"" + query.Get("code") + "\", \"redirectUrl\":\"" + oauthapp.redirectUrl + "\", \"grantType\":\"authorization_code\"}"
-		head := make(map[string]string)
-		head["X-CK-Appid"] = oauthapp.appID
-		head["Content-Type"] = "application/json"
-		head["Authorization"] = "Sign " + ComputeHmac256(data1, oauthapp.appSecret)
-		head["Host"] = ewelinkapi.host
-
-		res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.oauthToken, data1, head)
-		if err != nil {
-			htmlOutput(w, fmt.Sprint(err), 400, nil)
-		} else {
-			//res.StatusCode
-			conlog("  get access token success\n")
-			body := res.Body
-			accessToken = readValueInString(string(body), "accessToken")
-			atet := readValueInString(string(body), "atExpiredTime")
-			rt := readValueInString(string(body), "refreshToken")
-			rtet := readValueInString(string(body), "rtExpiredTime")
-			conlog("  saving access token\n")
-			saveConfig(1, "accessToken", accessToken)
-			saveConfig(1, "atExpiredTime", atet)
-			saveConfig(1, "refreshToken", rt)
-			err := saveConfig(1, "rtExpiredTime", rtet)
+	fmt.Print("\r")
+	pass, _ := readConfig("admin", "pass", 0)
+	//fmt.Println(pass)
+	if pass == "" {
+		if data.Get("user") != "" && data.Get("pass") != "" {
+			conlog("  Setting admin\n")
+			values := make(map[string]string)
+			values["user"] = data.Get("user")
+			values["pass"] = data.Get("pass")
+			err := saveConfig("admin", values, 0)
 			if err != nil {
-				conlog("  saving access token failed\n")
-				htmlOutput(w, "saving access token failed", 400, nil)
-			} else {
-				//deviceIDs := listDevices()
-				//"thingList":[],"total":1 我列不出来暂不会自动处理
-				html := `手动输入设备ID（在易微联APP或小程序里查看）：
-<form action="?install=2" method="post" name="form1">
-	Device ID: <input name="deviceID" type="text"><br>
-	<button>提交</button>
-<form>
-只处理1个设备，多个设备以后再说
-`
-				htmlOutput(w, html, 200, nil)
-			}
-		}
-	} else {
-		if query.Get("install") == "2" {
-			// 只处理1个设备，多个设备以后再说
-			err := saveConfig(1, "deviceIDs", data.Get("deviceID"))
-			if err != nil {
-				html := "Something error in saving: " + fmt.Sprint(err)
-				htmlOutput(w, html, 400, nil)
-			} else {
-				htmlOutput(w, "Success", 200, nil)
-				conlog("  Success\n")
-				quit <- 0
-			}
-		} else {
-			if query.Get("install") == "1" {
-				saveConfig(1, "appID", data.Get("appID"))
-				saveConfig(1, "appSecret", data.Get("appSecret"))
-				err := saveConfig(1, "appRedirect", data.Get("redirectUrl"))
-				if err != nil {
-					html := "Something error in saving: " + fmt.Sprint(err)
-					htmlOutput(w, html, 400, nil)
-				} else {
-					conlog("  redirecting to Ewelink\n")
-					appInit(1)
-					time1 := time.Now().Unix() * 1000
-					signstr := ComputeHmac256(oauthapp.appID + "_" + fmt.Sprint(time1), oauthapp.appSecret)
-					url := "https://c2ccdn.coolkit.cc/oauth/index.html" +
-					"?clientId=" + oauthapp.appID +
-					"&authorization=" + signstr +
-					"&seq=" + fmt.Sprint(time1) +
-					"&redirectUrl=" + oauthapp.redirectUrl +
-					"&nonce=ysun1234" +
-					"&grantType=authorization_code" +
-					"&state="
-					html := `redirecting
-<script>
-	url = location.href;
-	url = url.substr(0, url.indexOf("?"));
-	url = "` + url + `".concat(url);
-	location.href = url;
-</script>`
-					//fmt.Fprint(w, html)
-					htmlOutput(w, html, 200, nil)
-				}
-			} else {
-				fmt.Print("\r")
-				pass, _ := readConfig(1, "pass")
-				//fmt.Println(pass)
-				if pass != "" {
-					conlog("  OAuth Page Start\n")
-					html := `
-1. 在 https://dev.ewelink.cc/#/console 登录，申请成为开发者（可能要等几天）<br>
-2. 新建一个应用（个人开发者只能创建一个），将跳转地址设为下面 Redirect URL 中的url（其实就是当前页面）<br>
-3. 将 APPID 与 APP SECRET 填入下方，点击按钮提交给程序
-<form action="?install=1" method="post" name="form1">
-	App ID: <input name="appID" type="text"><br>
-	App Secret: <input name="appSecret" type="password"><br>
-	Redirect URL: <input name="redirectUrl" type="text"><br>
-	<button>提交</button>
-<form>
-<script>
-	document.form1.redirectUrl.value = location.href;
-</script>
-`
-					htmlOutput(w, html, 201, nil)
-				} else {
-					if data.Get("user") != "" && data.Get("pass") != "" {
-						saveConfig(1, "user", data.Get("user"))
-						err := saveConfig(1, "pass", data.Get("pass"))
-						if err != nil {
-							conlog("  Set admin failed\n")
-							html := `failed
+				conlog(fmt.Sprintln("  Set admin failed\n", err))
+				html := `failed
 <meta http-equiv="refresh" content="5;URL=">
 `
-							htmlOutput(w, html, 400, nil)
-						} else {
-							conlog("  Setting admin\n")
-							html := `Success
+				htmlOutput(w, html, 400, nil)
+			} else {
+				conlog("  Set admin success\n")
+				html := `Success
 <meta http-equiv="refresh" content="3;URL=">
 `
-							htmlOutput(w, html, 201, nil)
-						}
-					} else {
-						conlog("  Please set admin first\n")
-						html := `
-Set admin user:
+				htmlOutput(w, html, 201, nil)
+			}
+		} else {
+			conlog("  Please set admin first\n")
+			html := `
+设置管理员：
 <form action="" method="post" name="form1">
 	username: <input name="user" type="text"><br>
 	password: <input name="pass" type="password"><br>
 	<button>提交</button>
 <form>
+<script>
+	document.form1.user.focus();
+</script>
 `
-						htmlOutput(w, html, 201, nil)
+			htmlOutput(w, html, 201, nil)
+		}
+		return
+	}
+	if checkAdminShowLoginPage(w, r) {
+		if query.Get("install") == "finish" {
+			id_token := findConfig("token", "clientID", query.Get("tokenID"))
+			if id_token[0] < 0 {
+				html := "Something error finding clientID: " + query.Get("tokenID")
+				htmlOutput(w, html, 400, nil)
+			}
+			tokenInit(id_token[0])
+			var err error
+			//fmt.Println(data["deviceID[]"])
+			for _, deviceID := range data["deviceID[]"] {
+				if deviceID != "" {
+					//fmt.Println(deviceID)
+					id_devices := findConfig("device", "deviceID", deviceID)
+					id_device := id_devices[0]
+					if id_device < 0 {
+						id_device = 0
+					}
+					values := make(map[string]string)
+					values["tokenID"] = strconv.Itoa(id_token[0])
+					values["deviceID"] = deviceID
+					err = saveConfig("device", values, id_device)
+				}
+			}
+			if err != nil {
+				html := "Something error in saving: " + fmt.Sprint(err)
+				htmlOutput(w, html, 400, nil)
+			} else {
+				html := `成功，<br>请关闭窗口。`
+				htmlOutput(w, html, 200, nil)
+				conlog("  Success\n")
+				// 成功，结束Oauth
+				quit <- 0
+			}
+			return
+		}
+		if query.Get("install") == "addDevice" {
+			//deviceIDs := listDevices()
+			//"thingList":[],"total":0
+			html := `
+			我list里面是空的，似乎是因为不是特定的品牌商家，列不出来，不能做自动处理<br>
+			手动输入设备ID（在易微联APP或小程序里查看）：
+<form action="?install=finish&tokenID=` + query.Get("tokenID") + `" method="post" name="form1">
+	Device ID: <button onclick="addButton(); return false;">再添加一行</button><br>
+	<span id="inputs"></span>
+	<button>提交</button>
+<form>
+<script>
+	var area = document.getElementById("inputs");
+	function addButton() {
+		let input = document.createElement("input");
+		input.name = "deviceID[]";
+		input.type = "text";
+		area.appendChild(input);
+		area.appendChild(document.createElement("br"));
+	}
+	addButton();
+</script>
+`
+			htmlOutput(w, html, 200, nil)
+			return
+		}
+		if query.Get("code") != "" {
+			// 有code
+			conlog("  received a code\n")
+			ids := findConfig("client", "appID", query.Get("state"))
+			id := ids[0]
+			if id == -1 {
+				html := "Something error finding appID: " + query.Get("appID")
+				htmlOutput(w, html, 400, nil)
+			}
+			appInit(id)
+			data1 := "{\"code\":\"" + query.Get("code") + "\", \"redirectUrl\":\"" + oauthapp.redirectUrl + "\", \"grantType\":\"authorization_code\"}"
+			head := make(map[string]string)
+			head["X-CK-Appid"] = oauthapp.appID
+			head["Content-Type"] = "application/json"
+			head["Authorization"] = "Sign " + ComputeHmac256(data1, oauthapp.appSecret)
+			head["Host"] = ewelinkapi.host
+
+			res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.oauthToken, data1, head)
+			if err != nil {
+				htmlOutput(w, fmt.Sprint(head, err), 400, nil)
+			} else {
+				//res.StatusCode
+				conlog("  get access token success\n")
+				body := res.Body
+				accessToken := readValueInString(string(body), "accessToken")
+				atet := readValueInString(string(body), "atExpiredTime")
+				rt := readValueInString(string(body), "refreshToken")
+				rtet := readValueInString(string(body), "rtExpiredTime")
+				conlog("  saving access token\n")
+				values := make(map[string]string)
+				values["accessToken"] = accessToken
+				values["atExpiredTime"] = atet
+				values["refreshToken"] = rt
+				values["rtExpiredTime"] = rtet
+				values["clientID"] = strconv.Itoa(id)
+				err := saveConfig("token", values, 0)
+				if err != nil {
+					conlog("  saving access token failed\n")
+					htmlOutput(w, "saving access token failed", 400, nil)
+				} else {
+					ids := findConfig("token", "accessToken", accessToken)
+					id = ids[0]
+					if id == -1 {
+						html := "Something error finding accessToken ."
+						htmlOutput(w, html, 400, nil)
+					}
+					html := `Success
+<meta http-equiv="refresh" content="3;URL=?install=addDevice&tokenID=` + strconv.Itoa(id) + `">
+`
+					htmlOutput(w, html, 200, nil)
+				}
+			}
+			return
+		}
+		if query.Get("install") == "2" {
+			id := -1
+			if data.Get("app") != "" {
+				// 用已有app，不用保存，确认一下存在
+				ids := findConfig("client", "id", data.Get("app"))
+				id = ids[0]
+				if id == -1 {
+					html := "Something error in POST: " + data.Get("app")
+					htmlOutput(w, html, 400, nil)
+					return
+				}
+			} else {
+				// 保存新app
+				values := make(map[string]string)
+				values["appID"] = data.Get("appID")
+				values["appSecret"] = data.Get("appSecret")
+				values["appRedirect"] = data.Get("redirectUrl")
+				ids := findConfig("client", "appID", values["appID"])
+				id = ids[0]
+				if id == -1 {
+					id = 0
+				}
+				err := saveConfig("client", values, id)
+				if err != nil {
+					html := "Something error in saving: " + fmt.Sprint(err)
+					htmlOutput(w, html, 400, nil)
+					return
+				}
+				if id == 0 {
+					ids := findConfig("client", "appID", values["appID"])
+					id = ids[0]
+					if id == -1 {
+						html := "Something error in find: " + values["appID"]
+						htmlOutput(w, html, 400, nil)
+						return
 					}
 				}
 			}
+			conlog("  redirecting to Ewelink\n")
+			appInit(id)
+			time1 := time.Now().Unix() * 1000
+			signstr := ComputeHmac256(oauthapp.appID + "_" + fmt.Sprint(time1), oauthapp.appSecret)
+			url := "https://c2ccdn.coolkit.cc/oauth/index.html" +
+			"?clientId=" + oauthapp.appID +
+			"&authorization=" + signstr +
+			"&seq=" + fmt.Sprint(time1) +
+			"&redirectUrl=" + oauthapp.redirectUrl +
+			"&nonce=ysun1234" +
+			"&grantType=authorization_code" +
+			"&state=" + oauthapp.appID
+			html := `redirecting
+<script>
+	location.href = "` + url + `";
+</script>`
+			//fmt.Fprint(w, html)
+			htmlOutput(w, html, 200, nil)
+			return
 		}
+		if query.Get("install") == "1" {
+			conlog("  OAuth Page Start\n")
+			html1 := `
+1. 在 https://dev.ewelink.cc/#/console 登录，申请成为开发者（可能要等几天）<br>
+2. 新建一个应用（个人开发者只能创建一个），将跳转地址设为下面 Redirect URL 中的url（其实就是当前页面）<br>
+3. 将 APPID 与 APP SECRET 填入下方，点击按钮提交给程序<br>
+	App ID: <input name="appID" type="text"><br>
+	App Secret: <input name="appSecret" type="password"><br>
+	Redirect URL: <input name="redirectUrl" type="text" readonly><br>
+`
+			html := `<form action="?install=2" method="post" name="form1" onsubmit="return check(this);">
+`
+			result, err := readConfig("client", "id,appID", 0)
+			if err == nil && result != "" {
+				apps := strings.Split(result, "\n")
+				for _, app := range apps {
+					id := app[0:strings.Index(app, "|")]
+					appID := app[strings.Index(app, "|")+1:]
+					html += `<label>
+	<input type="radio" name="app" value="` + id + `">使用已有App ID: ` + appID + `<br>
+</label><br>
+`
+				}
+				html += `<label>
+	<input type="radio" name="app" value="">或新输入一个App:<br>
+` + html1 + `
+</label>
+`
+			} else {
+				html += html1
+			}
+			html += `
+	<button>提交</button>
+<form>
+<script>
+	let url = location.href;
+	url = url.substr(0, url.indexOf("?"));
+	document.form1.redirectUrl.value = url;
+	function check(f) {
+		let e = document.getElementsByName("app");
+		for (let i=0; i<e.length; i++) {
+			if (e[i].checked) {
+				if (e[i].value != "") return true;
+			}
+		}
+		if (f.appID.value != "" && f.appSecret.value != "") {
+			return true;
+		} else {
+			alert("请输入");
+			return false;
+		}
+	}
+</script>`
+			htmlOutput(w, html, 201, nil)
+			return
+		}
+		html := "<a href=\"?install=1\">认证新账号</a>（注意：旧账号重新认证将会使原有token失效！）<br>"
+		dIDs, _ := readConfig("device", "deviceID", 0)
+		//fmt.Println(dIDs)
+		if dIDs != "" {
+			result, err := readConfig("token", "id", 0)
+			if err == nil && result != "" {
+				html += `<br>或者在已有账号中添加设备：<br>
+<form action="" method="post" name="form1" onsubmit="return check(this);">`
+				id_tokens := strings.Split(result, "\n")
+				for _, id_token := range id_tokens {
+					html += `
+	<label>
+		<input type="radio" name="tokenID" value="` + id_token + `">账号` + id_token + `，其中已有的设备ID: `
+					sql := "select deviceID from device where tokenID=" + id_token + ";"
+					result, err = sqlite(sql)
+					if err == nil && result != "" {
+						deviceIDs := strings.Split(result, "\n")
+						for _, deviceID := range deviceIDs {
+							html += deviceID + ", "
+						}
+						html = html[0:len(html)-2]
+					}
+					html += `
+	</label><br>`
+				}
+				html += `
+	<button>确定</button><br>
+<form>
+<script>
+	function check(f) {
+		let e = document.getElementsByName("tokenID");
+		for (let i=0; i<e.length; i++) {
+			if (e[i].checked) {
+				f.action = "?install=addDevice&tokenID=".concat(e[i].value);
+				return true;
+			}
+		}
+		return false;
+	}
+</script>`
+			}
+		}
+		htmlOutput(w, html, 201, nil)
+		return
 	}
 }
 
 func turnLight(deviceID string, turn string) error {
-	return setDeviceStatus(1, deviceID, turn)
+	if turn != "on" && turn != "off" {
+		return errors.New("invalid operate: \"" + turn + "\"")
+	}
+	// 尝试查找有没有这个device
+	id_devices := findConfig("device", "deviceID", deviceID)
+	if id_devices[0] < 1 {
+		// 没有这个device，可能参数传入的是序列id
+		id_device, err := strconv.Atoi(deviceID)
+		if err == nil {
+			// 尝试读取这个数字对应的deviceID
+			deviceID1, err := readConfig("device", "deviceID", id_device)
+			if err == nil && deviceID1 != "" {
+				return setDeviceStatus(deviceID1, turn)
+			}
+		}
+		// 不是数字，也没有这个device
+		return errors.New("device ID: \"" + deviceID + "\" not found.")
+	}
+	return setDeviceStatus(deviceID, turn)
+}
+
+func getUserProfile(id int) (string, error) {
+	head := make(map[string]string)
+	head["X-CK-Appid"] = oauthapp.appID
+	head["Host"] = ewelinkapi.host
+	head["Content-Type"] = "application/json"
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
+	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/user/profile"
+	res, err := curl("GET", url, "", head)
+	if err != nil {
+		return res.Body, err
+	} else {
+		body := res.Body
+		//fmt.Println(body)
+		err1 := readValueInString(string(body), "error")
+		if err1 != "0" {
+			conlog("  get user profile failed.\n")
+			return "", errors.New(body)
+		} else {
+			return body, nil
+		}
+	}
+}
+func getFamily(id int) (string, error) {
+	head := make(map[string]string)
+	head["X-CK-Appid"] = oauthapp.appID
+	head["Host"] = ewelinkapi.host
+	head["Content-Type"] = "application/json"
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
+	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/family"
+	res, err := curl("GET", url, "", head)
+	if err != nil {
+		return res.Body, err
+	} else {
+		body := res.Body
+		//fmt.Println(body)
+		err1 := readValueInString(string(body), "error")
+		if err1 != "0" {
+			conlog("  get user profile failed.\n")
+			return "", errors.New(body)
+		} else {
+			return body, nil
+		}
+	}
 }
 func listDevices() (string, error) {
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
 	head["Content-Type"] = "application/json"
-	head["Authorization"] = "Bearer " + accessToken
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing"
 	res, err := curl("GET", url, "", head)
 	if err != nil {
-		return "", err
+		return res.Body, err
 	} else {
 		body := res.Body
 		//fmt.Println(body)
@@ -627,12 +977,33 @@ func listDevices() (string, error) {
 		}
 	}
 }
-func getDeviceStatus(id int, deviceID string) (string, error) {
+func findTokenIDofDevice(deviceID string) (int, error) {
+	id_device := findConfig("device", "deviceID", deviceID)
+	if id_device[0] < 0 {
+		return -1, errors.New("device ID " + deviceID + " not found.")
+	}
+	id_token_string, err := readConfig("device", "tokenID", id_device[0])
+	if err != nil {
+		return -1, err
+	}
+	id_token, err := strconv.Atoi(id_token_string)
+	if err != nil {
+		return -1, err
+	}
+	return id_token, nil
+}
+func getDeviceStatus(deviceID string) (string, error) {
+	id_token, err := findTokenIDofDevice(deviceID)
+	if err != nil {
+		return "", err
+	}
+	tokenInit(id_token)
+	//fmt.Println("token id ", id_token)
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
 	head["Content-Type"] = "application/json"
-	head["Authorization"] = "Bearer " + accessToken
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status" + "?type=1&id=" + deviceID + "&params=switch"
 	res, err := curl("GET", url, "", head)
 	if err != nil {
@@ -650,12 +1021,17 @@ func getDeviceStatus(id int, deviceID string) (string, error) {
 		}
 	}
 }
-func setDeviceStatus(id int, deviceID string, status string) error {
+func setDeviceStatus(deviceID string, status string) error {
+	id_token, err := findTokenIDofDevice(deviceID)
+	if err != nil {
+		return err
+	}
+	tokenInit(id_token)
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
 	head["Content-Type"] = "application/json"
-	head["Authorization"] = "Bearer " + accessToken
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status"
 	data := "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
 	res, err := curl("POST", url, data, head)
@@ -674,13 +1050,17 @@ func setDeviceStatus(id int, deviceID string, status string) error {
 		}
 	}
 }
-func RefreshToken(refreshToken string) error {
+func RefreshToken(id int) error {
+	refreshToken, err := readConfig("token", "refreshToken", id)
+	if err != nil {
+		return err
+	}
 	data := "{\"rt\":\"" + refreshToken + "\"}"
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
 	head["Content-Type"] = "application/json"
-	head["Authorization"] = "Bearer " + accessToken
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
 
 	res, err := curl("POST", ewelinkapi.scheme + ewelinkapi.host + ewelinkapi.refreshToken, data, head)
 	if err != nil {
@@ -695,14 +1075,16 @@ func RefreshToken(refreshToken string) error {
 			return errors.New(body)
 		} else {
 			conlog("  saving access token\n")
-			accessToken = readValueInString(string(body), "at")
+			accessToken := readValueInString(string(body), "at")
 			atet := (time.Now().Unix() +  30 * 24 * 60 * 60) * 1000
 			rt := readValueInString(string(body), "rt")
 			rtet := (time.Now().Unix() +  60 * 24 * 60 * 60) * 1000
-			saveConfig(1, "accessToken", accessToken)
-			saveConfig(1, "atExpiredTime", strconv.FormatInt(atet, 10))
-			saveConfig(1, "refreshToken", rt)
-			return saveConfig(1, "rtExpiredTime", strconv.FormatInt(rtet, 10))
+			values := make(map[string]string)
+			values["accessToken"] = accessToken
+			values["atExpiredTime"] = strconv.FormatInt(atet, 10)
+			values["refreshToken"] = rt
+			values["rtExpiredTime"] = strconv.FormatInt(rtet, 10)
+			return saveConfig("token", values, id)
 		}
 	}
 }
@@ -712,7 +1094,7 @@ func sqlite(str string) (string, error) {
 	//fmt.Println(str)
 	result := ""
 	cmd := exec.Command("sqlite3", dbFilePath, str)
-	stdout, err := cmd.StdoutPipe()
+	/*stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "p", err
 	}
@@ -727,78 +1109,141 @@ func sqlite(str string) (string, error) {
 		return "w", err
 	}
 	//fmt.Println(result, str)
-	return result, nil
+	return result, nil*/
+	result_b, err := cmd.Output()
+	result = strings.TrimSpace(string(result_b))
+	result = strings.TrimRight(result, "\n")
+	return result, err
 }
-func saveConfig(id int, key string, value string) error {
-	table := "data"
-	if key == "user" || key == "pass" {
-		table = "admin"
+func saveConfig(table string, key_value map[string]string, id int) error {
+	if !validSqlKey(table) {
+		return errors.New("\"" + table + "\" is invalid.")
 	}
-	_, err := sqlite("update " + table + " set " + key + "=\"" + value + "\" where id=" + strconv.Itoa(id) + ";")
+	for key, value := range key_value {
+		if !validSqlKey(key) {
+			return errors.New("\"" + key + "\" is invalid.")
+		}
+		if !validSqlKey(value) {
+			return errors.New("\"" + value + "\" is invalid.")
+		}
+	}
+	oldvalue, err := readConfig(table, "*", id)
+	if err == nil {
+		if id == 0 || oldvalue == "" {
+			keys := ""
+			values := ""
+			for key, value := range key_value {
+				keys += key + ", "
+				values += "\"" + value + "\", "
+			}
+			keys = keys[0:strings.LastIndex(keys, ",")]
+			values = values[0:strings.LastIndex(values, ",")]
+			sql := "insert into " + table + " (" + keys + ") values (" + values + ");"
+			//fmt.Println(sql)
+			_, err = sqlite(sql)
+		} else {
+			keys := ""
+			for key, value := range key_value {
+				keys += key + "=\"" + value + "\", "
+			}
+			keys = keys[0:strings.LastIndex(keys, ",")]
+			sql := "update " + table + " set " + keys + " where id=" + strconv.Itoa(id) + ";"
+			//fmt.Println(sql)
+			_, err = sqlite(sql)
+		}
+	}
 	return err
 }
-func readConfig(id int, key string) (string, error) {
-	table := "data"
-	if key == "user" || key == "pass" {
-		table = "admin"
+func readConfig(table string, key string, id int) (string, error) {
+	if !validSqlKey(table) {
+		return "", errors.New("\"" + table + "\" is invalid.")
 	}
-	return sqlite("select " + key + " from " + table + " where id=" + strconv.Itoa(id) + ";" )
+	if !validSqlKey(key) {
+		return "", errors.New("\"" + key + "\" is invalid.")
+	}
+	if id < 0 {
+		return "", errors.New("id is invalid.")
+	}
+	sql := "select " + key + " from " + table
+	if id > 0 {
+		sql += " where id=" + strconv.Itoa(id)
+	}
+	sql += ";"
+	//fmt.Println(sql)
+	return sqlite(sql)
 }
-/*
-admin (id user pass)
-data (id appID appSecret appRedirect accessToken atExpiredTime refreshToken rtExpiredTime deviceIDs )
-*/
-func validToken() bool {
-	_, err := os.Stat(dbFilePath)
+func findConfig(table string, key string, value string) []int {
+	var ids []int
+	if !validSqlKey(table) {
+		ids = append(ids, -1)
+		return ids
+	}
+	if !validSqlKey(key) {
+		ids = append(ids, -1)
+		return ids
+	}
+	if !validSqlKey(value) {
+		ids = append(ids, -1)
+		return ids
+	}
+	sql := "select id from " + table + " where " + key + "=\"" + value + "\";"
+	id_string, err := sqlite(sql);
 	if err != nil {
-		sqlite("create table admin (id integer primary key, user char(20), pass char(20));")
-		sqlite("create table data (id integer primary key, appID text, appSecret text, appRedirect text, accessToken text, atExpiredTime text, refreshToken text, rtExpiredTime text, deviceIDs text);")
-		sqlite("insert into admin (id) values (1);")
-		sqlite("insert into data (id) values (1);")
+		ids = append(ids, -1)
+		return ids
+	}
+	id_arr := strings.Split(id_string, "\n")
+	for _, id1 := range id_arr {
+		id, err := strconv.Atoi(id1)
+		if err != nil {
+			var ids1 []int
+			ids1 = append(ids1, -1)
+			return ids1
+		} else {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+func validSqlKey(str string) bool {
+	if str == "" {
+		return false
+	}
+	tmp := strings.Index(str, " ")
+	if tmp > -1 {
+		return false
+	}
+	tmp = strings.Index(str, ";")
+	if tmp > -1 {
+		return false
+	}
+	return true
+}
+
+func validToken(id int) bool {
+	//fmt.Println("_" + accessToken + "_")
+	atExpiredTime, _ := readConfig("token", "atExpiredTime", id)
+	if len(atExpiredTime) > 3 {
+		atExpiredTime = atExpiredTime[0:len(atExpiredTime)-3]
+	}
+	time1, err := strconv.Atoi(atExpiredTime)
+	if err != nil {
+		fmt.Println(err)
+	}
+	time2 := int(time.Now().Unix() + 15*24*60*60)
+	if time1 < time2 {
+		err = RefreshToken(id)
+		if err != nil {
+			conlog(alertlog(fmt.Sprint(err)) + "\n")
+			return false
+		}
+	}
+	_, err = listDevices()
+	//_, err = getFamily(id)
+	if err != nil {
 		return false
 	} else {
-		accessToken, err = readConfig(1, "accessToken")
-		if err != nil {
-			//fmt.Println("_" + accessToken + "_")
-			fmt.Println(err)
-			return false
-		} else {
-			if accessToken == "" {
-				return false
-			}
-			dIDs, _ := readConfig(1, "deviceIDs")
-			if dIDs == "" {
-				return false
-			}
-			appInit(1)
-			//fmt.Println("_" + accessToken + "_")
-			atExpiredTime, _ := readConfig(1, "atExpiredTime")
-			if len(atExpiredTime) > 3 {
-				atExpiredTime = atExpiredTime[0:len(atExpiredTime)-3]
-			}
-			time1, err := strconv.Atoi(atExpiredTime)
-			if err != nil {
-				fmt.Println(err)
-			}
-			time2 := int(time.Now().Unix() + 15*24*60*60)
-			if time1 < time2 {
-				refreshToken, err := readConfig(1, "refreshToken")
-				if err != nil {
-					fmt.Println(err)
-				}
-				err = RefreshToken(refreshToken)
-				if err != nil {
-					conlog(alertlog(fmt.Sprint(err)) + "\n")
-					return false
-				}
-			}
-			_, err = listDevices()
-			if err != nil {
-				return false
-			} else {
-				return true
-			}
-		}
+		return true
 	}
 }
 func removeStrbefor(text string, pre string) string {
@@ -842,6 +1287,14 @@ func ComputeHmac256(message string, secret string) string {
     h := hmac.New(sha256.New, key)
     h.Write([]byte(message))
     return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+func binOutput(w http.ResponseWriter, body string, code int, head map[string]string) {
+	w.Header().Set("Content-Type", "application/stream")
+	for k, v := range head {
+		w.Header().Set(k, v)
+	}
+	w.WriteHeader(code)
+	w.Write([]byte(body))
 }
 func htmlOutput(w http.ResponseWriter, body string, code int, head map[string]string) {
 	w.Header().Set("Content-Type", "text/html")
