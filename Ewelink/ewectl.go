@@ -248,9 +248,11 @@ func useage() {
   -c|-config PathofFile  set path of database
   add                    start a web page to add device
   web                    start a web page
-  turnon id              turn on the device
-  turnoff id             turn off the device
-         (the device ID string or order number in datebase)
+  turnon ID              turn on the device
+  turnoff ID             turn off the device
+
+(the ID is device id string or serial number in datebase
+for multi-outlet device, you can use "ID:number" to appoint that)
 
 `
 	//fmt.Print(html)
@@ -1108,13 +1110,12 @@ func setDeviceStatus(status string, deviceID string, port int) error {
 	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status"
 	data := ""
-	if port > -1 {
-		tmp, _ := getDeviceStatus(deviceID)
-		if len(tmp) > 1 {
-			data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switches\":[{\"switch\":\"" + status + "\", \"outlet\": " + strconv.Itoa(port) + "}]}}"
-		} else {
-			data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
+	tmp, _ := getDeviceStatus(deviceID)
+	if len(tmp) > 1 {
+		if port < 0 {
+			port = 0
 		}
+		data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switches\":[{\"switch\":\"" + status + "\", \"outlet\": " + strconv.Itoa(port) + "}]}}"
 	} else {
 		data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
 	}
