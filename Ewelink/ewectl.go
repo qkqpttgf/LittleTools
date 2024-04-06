@@ -121,10 +121,20 @@ func main() {
 				device := device1[strings.Index(device1, "|")+1:]
 				//fmt.Println(device)
 				status, err := getDeviceStatus(device)
+				tmp := ""
 				if err != nil {
-					status = fmt.Sprint(err)
+					tmp = fmt.Sprint(err)
+				} else {
+					if len(status) > 1 {
+						for i, s := range status {
+							tmp += "chanel_" + fmt.Sprint(i) + " " + s + ", "
+						}
+						tmp = tmp[0:len(tmp)-2]
+					} else {
+						tmp = status[0]
+					}
 				}
-				conlog(id + ", " + device + ": " + status + "\n")
+				conlog(id + ", " + device + ": " + tmp + "\n")
 			}
 		} else {
 			conlog(alertlog("No device, OAuth start.") + "\n")
@@ -420,7 +430,19 @@ func route(w http.ResponseWriter, r *http.Request) {
 	if checkAdminShowLoginPage(w, r) {
 		if data.Get("device") != "" && (data.Get("action") == "on" || data.Get("action") == "off") {
 			httpCode := 200
-			err := turnLight(data.Get("device"), data.Get("action"))
+			//err := turnLight(data.Get("device"), data.Get("action"))
+			port := -1
+			if data.Get("outlet") != "" {
+				port1, err := strconv.Atoi(data.Get("outlet"))
+				//fmt.Println(port1)
+				if err != nil {
+					htmlOutput(w, "通道号 \"" + data.Get("outlet") + "\"错误，需要数字", 400, nil)
+					return
+				}
+				port = port1
+				//fmt.Println(port)
+			}
+			err := setDeviceStatus(data.Get("action"), data.Get("device"), port)
 			if err != nil {
 				html += "  failed! " + fmt.Sprint(err) + "\n"
 				httpCode = 400
@@ -437,26 +459,52 @@ func route(w http.ResponseWriter, r *http.Request) {
 				id := device1[0:strings.Index(device1, "|")]
 				device := device1[strings.Index(device1, "|")+1:]
 				//fmt.Println(device)
+				html += id + ", <input name=\"device\" value=\"" + device + "\" size=\"10\" readonly> 状态："
 				status, err := getDeviceStatus(device)
-				//conlog("  " + device + ": " + status + "\n")
 				if err != nil {
-					status = fmt.Sprint(err)
+					html += fmt.Sprint(err) + "<br>"
+				} else {
+					if len(status) > 1 {
+						html += `<div style="display: inline-block;">`
+						for i, s := range status {
+							html += `
+							<form name="` + device + "_" + fmt.Sprint(i) + `" method="post" style="display: inline-block;">
+								<input name="device" value="` + device + `" type="hidden">
+								通道<input name="outlet" value="` + fmt.Sprint(i) + `" style="width: 25;" readonly>
+								` + s + `
+								<button name="action" value="on"`
+								if s != "off" {
+									html += " disabled"
+								}
+								html += `>开</button>
+					<button name="action" value="off"`
+								if s != "on" {
+									html += " disabled"
+								}
+								html += `>关</button>
+							</form><br>`
+						}
+						html = html[0:len(html)-4]
+						html += `</div><br>
+						`
+					} else {
+						//conlog("a\n" + alertlog(fmt.Sprint(status)) + "\nb")
+						html += status[0] + `
+					<form name="` + device + `Form" method="post" style="display: inline-block;">
+						<input name="device" value="` + device + `" type="hidden">
+						<button name="action" value="on"`
+									if status[0] != "off" {
+										html += " disabled"
+									}
+									html += `>开</button>
+						<button name="action" value="off"`
+									if status[0] != "on" {
+										html += " disabled"
+									}
+									html += `>关</button>
+					</form><br>`
+					}
 				}
-				html += `
-<form name="` + device + `Form" method="post">
-	` + id + `,
-	<input name="device" value="` + device + `" size="10" readonly>状态: ` + status + `
-	<button name="action" value="on"`
-				if status != "off" {
-					html += " disabled"
-				}
-				html += `>开</button>
-	<button name="action" value="off"`
-				if status != "on" {
-					html += " disabled"
-				}
-				html += `>关</button>
-</form>`
 			}
 			htmlOutput(w, html, 200, nil)
 		}
@@ -893,22 +941,33 @@ func turnLight(deviceID string, turn string) error {
 	if turn != "on" && turn != "off" {
 		return errors.New("invalid operate: \"" + turn + "\"")
 	}
+	port := -1
+	if strings.Index(deviceID, ":") > 0 {
+		port1, err := strconv.Atoi(deviceID[strings.Index(deviceID, ":")+1:])
+		//fmt.Println(port1)
+		if err != nil {
+			return err
+		}
+		port = port1
+		//fmt.Println(port)
+		deviceID = deviceID[0:strings.Index(deviceID, ":")]
+	}
 	// 尝试查找有没有这个device
-	id_devices := findConfig("device", "deviceID", deviceID)
-	if id_devices[0] < 1 {
+	id_devices := findConfig("device", "deviceID", deviceID)[0]
+	if id_devices < 1 {
 		// 没有这个device，可能参数传入的是序列id
 		id_device, err := strconv.Atoi(deviceID)
 		if err == nil {
 			// 尝试读取这个数字对应的deviceID
 			deviceID1, err := readConfig("device", "deviceID", id_device)
 			if err == nil && deviceID1 != "" {
-				return setDeviceStatus(deviceID1, turn)
+				return setDeviceStatus(turn, deviceID1, port)
 			}
 		}
 		// 不是数字，也没有这个device
 		return errors.New("device ID: \"" + deviceID + "\" not found.")
 	}
-	return setDeviceStatus(deviceID, turn)
+	return setDeviceStatus(turn, deviceID, port)
 }
 
 func getUserProfile(id int) (string, error) {
@@ -992,10 +1051,11 @@ func findTokenIDofDevice(deviceID string) (int, error) {
 	}
 	return id_token, nil
 }
-func getDeviceStatus(deviceID string) (string, error) {
+func getDeviceStatus(deviceID string) ([]string, error) {
+	var result []string
 	id_token, err := findTokenIDofDevice(deviceID)
 	if err != nil {
-		return "", err
+		return result, err
 	}
 	tokenInit(id_token)
 	//fmt.Println("token id ", id_token)
@@ -1004,24 +1064,38 @@ func getDeviceStatus(deviceID string) (string, error) {
 	head["Host"] = ewelinkapi.host
 	head["Content-Type"] = "application/json"
 	head["Authorization"] = "Bearer " + oauthapp.accessToken
-	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status" + "?type=1&id=" + deviceID + "&params=switch"
+	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status" + "?type=1&id=" + deviceID + "&params=switch%7Cswitches"
 	res, err := curl("GET", url, "", head)
 	if err != nil {
-		return "", err
+		return result, err
 	} else {
 		body := res.Body
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
 			conlog("  get " + deviceID + " status failed.\n")
-			return "", errors.New(body)
+			return result, errors.New(body)
 		} else {
-			status := readValueInString(string(body), "switch")
-			return status, nil
+			switches := readValueInString(string(body), "switches")
+			//fmt.Println(switches)
+			if switches != "" {
+				switches = body[strings.Index(body, "switches")+8:]
+				for strings.Index(switches, "switch") > 0 {
+					switch0 := readValueInString(string(switches), "switch")
+					result = append(result, switch0)
+					switches = switches[strings.Index(switches, "switch")+6:]
+				}
+				//fmt.Println(result)
+				return result, nil
+			} else {
+				status := readValueInString(string(body), "switch")
+				result = append(result, status)
+				return result, nil
+			}
 		}
 	}
 }
-func setDeviceStatus(deviceID string, status string) error {
+func setDeviceStatus(status string, deviceID string, port int) error {
 	id_token, err := findTokenIDofDevice(deviceID)
 	if err != nil {
 		return err
@@ -1033,7 +1107,17 @@ func setDeviceStatus(deviceID string, status string) error {
 	head["Content-Type"] = "application/json"
 	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status"
-	data := "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
+	data := ""
+	if port > -1 {
+		tmp, _ := getDeviceStatus(deviceID)
+		if len(tmp) > 1 {
+			data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switches\":[{\"switch\":\"" + status + "\", \"outlet\": " + strconv.Itoa(port) + "}]}}"
+		} else {
+			data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
+		}
+	} else {
+		data = "{\"type\":1,\"id\":\"" + deviceID + "\",\"params\":{\"switch\":\"" + status + "\"}}"
+	}
 	res, err := curl("POST", url, data, head)
 	if err != nil {
 		return err
@@ -1238,8 +1322,8 @@ func validToken(id int) bool {
 			return false
 		}
 	}
-	_, err = listDevices()
-	//_, err = getFamily(id)
+	//_, err = listDevices()
+	_, err = getFamily(id)
 	if err != nil {
 		return false
 	} else {
