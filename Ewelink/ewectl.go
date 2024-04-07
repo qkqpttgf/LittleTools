@@ -68,6 +68,12 @@ func appInit(id int) {
 	oauthapp.appSecret, _ = readConfig("client", "appSecret", id)
 	oauthapp.redirectUrl, _ = readConfig("client", "appRedirect", id)
 }
+type DeviceStatus struct {
+	name string
+	deviceID string
+	online bool
+	switches []string
+}
 
 var quit chan int
 //var accessToken string
@@ -120,21 +126,21 @@ func main() {
 				id := device1[0:strings.Index(device1, "|")]
 				device := device1[strings.Index(device1, "|")+1:]
 				//fmt.Println(device)
-				status, err := getDeviceStatus(device)
+				deviceStatus, err := checkDeviceOnline(device)
 				tmp := ""
 				if err != nil {
 					tmp = fmt.Sprint(err)
 				} else {
-					if len(status) > 1 {
-						for i, s := range status {
+					if len(deviceStatus.switches) > 1 {
+						for i, s := range deviceStatus.switches {
 							tmp += "chanel_" + fmt.Sprint(i) + " " + s + ", "
 						}
 						tmp = tmp[0:len(tmp)-2]
 					} else {
-						tmp = status[0]
+						tmp = deviceStatus.switches[0]
 					}
 				}
-				conlog(id + ", " + device + ": " + tmp + "\n")
+				conlog(id + ", " + device + ", " + deviceStatus.name + ": " + tmp + "\n")
 			}
 		} else {
 			conlog(alertlog("No device, OAuth start.") + "\n")
@@ -248,11 +254,11 @@ func useage() {
   -c|-config PathofFile  set path of database
   add                    start a web page to add device
   web                    start a web page
-  turnon ID              turn on the device
-  turnoff ID             turn off the device
+  turnon ID[:num]        turn on the device
+  turnoff ID[:num]       turn off the device
 
 (the ID is device id string or serial number in datebase
-for multi-outlet device, you can use "ID:number" to appoint that)
+for multi-outlet device, you can use "ID:number" to appoint a channel)
 
 `
 	//fmt.Print(html)
@@ -461,50 +467,57 @@ func route(w http.ResponseWriter, r *http.Request) {
 				id := device1[0:strings.Index(device1, "|")]
 				device := device1[strings.Index(device1, "|")+1:]
 				//fmt.Println(device)
-				html += id + ", <input name=\"device\" value=\"" + device + "\" size=\"10\" readonly> 状态："
-				status, err := getDeviceStatus(device)
+				deviceStatus, err := checkDeviceOnline(device)
+				html +=`
+` + id + `, <input name="device" placeholder="设备ID" value="` + device + `" size="10" readonly>
+	<input name="devicename" placeholder="设备名称" value="` + deviceStatus.name + `" size="5" readonly> 状态：
+	`
 				if err != nil {
 					html += fmt.Sprint(err) + "<br>"
 				} else {
-					if len(status) > 1 {
-						html += `<div style="display: inline-block;">`
-						for i, s := range status {
-							html += `
-							<form name="` + device + "_" + fmt.Sprint(i) + `" method="post" style="display: inline-block;">
-								<input name="device" value="` + device + `" type="hidden">
-								通道<input name="outlet" value="` + fmt.Sprint(i) + `" style="width: 25;" readonly>
-								` + s + `
-								<button name="action" value="on"`
-								if s != "off" {
-									html += " disabled"
-								}
-								html += `>开</button>
-					<button name="action" value="off"`
-								if s != "on" {
-									html += " disabled"
-								}
-								html += `>关</button>
-							</form><br>`
-						}
-						html = html[0:len(html)-4]
-						html += `</div><br>
-						`
-					} else {
-						//conlog("a\n" + alertlog(fmt.Sprint(status)) + "\nb")
-						html += status[0] + `
-					<form name="` + device + `Form" method="post" style="display: inline-block;">
-						<input name="device" value="` + device + `" type="hidden">
-						<button name="action" value="on"`
-									if status[0] != "off" {
+					if deviceStatus.online {
+							if len(deviceStatus.switches) > 1 {
+								html += `<div style="display: inline-block;">`
+								for i, s := range deviceStatus.switches {
+									html += `
+		<form name="Form_` + device + "_" + fmt.Sprint(i) + `" method="post" style="display: inline-block;">
+			<input name="device" value="` + device + `" type="hidden">
+			通道<input name="outlet" value="` + fmt.Sprint(i) + `" style="width: 25;" readonly>
+			` + s + `
+			<button name="action" value="on"`
+									if s != "off" {
 										html += " disabled"
 									}
 									html += `>开</button>
-						<button name="action" value="off"`
-									if status[0] != "on" {
+			<button name="action" value="off"`
+									if s != "on" {
 										html += " disabled"
 									}
 									html += `>关</button>
-					</form><br>`
+		</form><br>`
+								}
+								html = html[0:len(html)-4]
+								html += `
+	</div><br>`
+							} else {
+							//conlog("a\n" + alertlog(fmt.Sprint(status)) + "\nb")
+								html += deviceStatus.switches[0] + `
+	<form name="Form_` + device + `" method="post" style="display: inline-block;">
+		<input name="device" value="` + device + `" type="hidden">
+		<button name="action" value="on"`
+								if deviceStatus.switches[0] != "off" {
+									html += " disabled"
+								}
+								html += `>开</button>
+		<button name="action" value="off"`
+								if deviceStatus.switches[0] != "on" {
+									html += " disabled"
+								}
+								html += `>关</button>
+	</form><br>`
+						}
+					} else {
+						html += "不在线<br>"
 					}
 				}
 			}
@@ -699,12 +712,24 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if query.Get("install") == "addDevice" {
-			//deviceIDs := listDevices()
-			//"thingList":[],"total":0
+			id_token, _ := strconv.Atoi(query.Get("tokenID"))
 			html := `
-			我list里面是空的，似乎是因为不是特定的品牌商家，列不出来，不能做自动处理<br>
-			手动输入设备ID（在易微联APP或小程序里查看）：
 <form action="?install=finish&tokenID=` + query.Get("tokenID") + `" method="post" name="form1">
+	自动获取到的：
+	`
+			deviceIDs, err := listDevices(id_token)
+			//"thingList":[],"total":0
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				//fmt.Println(deviceIDs)
+				for _, deviceID := range deviceIDs {
+					html += `Device ID: <input type="text" name="deviceID[]" value="` + deviceID + `"><br>`
+				}
+			}
+			html += `
+			如果自动获取不到，可能是因为不是特定的品牌商家，所以列不出来。<br>
+			手动输入设备ID（在易微联APP或小程序里查看）：<br>
 	Device ID: <button onclick="addButton(); return false;">再添加一行</button><br>
 	<span id="inputs"></span>
 	<button>提交</button>
@@ -1016,7 +1041,9 @@ func getFamily(id int) (string, error) {
 		}
 	}
 }
-func listDevices() (string, error) {
+func listDevices(tokenID int) ([]string, error) {
+	tokenInit(tokenID)
+	var result []string
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
@@ -1025,16 +1052,22 @@ func listDevices() (string, error) {
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing"
 	res, err := curl("GET", url, "", head)
 	if err != nil {
-		return res.Body, err
+		return result, err
 	} else {
 		body := res.Body
 		//fmt.Println(body)
 		err1 := readValueInString(string(body), "error")
 		if err1 != "0" {
 			conlog("  list device failed.\n")
-			return "", errors.New(body)
+			return result, errors.New(body)
 		} else {
-			return body, nil
+			dIDs := body[strings.Index(body, "deviceid")-1:]
+			for strings.Index(dIDs, "deviceid") > 0 {
+				deviceID := readValueInString(string(dIDs), "deviceid")
+				result = append(result, deviceID)
+				dIDs = dIDs[strings.Index(dIDs, "deviceid")+6:]
+			}
+			return result, nil
 		}
 	}
 }
@@ -1052,6 +1085,68 @@ func findTokenIDofDevice(deviceID string) (int, error) {
 		return -1, err
 	}
 	return id_token, nil
+}
+func checkDeviceOnline(deviceID string) (DeviceStatus, error) {
+	id_token, _ := findTokenIDofDevice(deviceID)
+	tokenInit(id_token)
+	var result DeviceStatus
+	head := make(map[string]string)
+	head["X-CK-Appid"] = oauthapp.appID
+	head["Host"] = ewelinkapi.host
+	head["Content-Type"] = "application/json"
+	head["Authorization"] = "Bearer " + oauthapp.accessToken
+	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing"
+	data := `{"thingList": [{"itemType": 1, "id": "` + deviceID + `"}]}`
+	res, err := curl("POST", url, data, head)
+	if err != nil {
+		return result, err
+	} else {
+		body := res.Body
+		//fmt.Println(body)
+		err1 := readValueInString(string(body), "error")
+		if err1 != "0" {
+			conlog("  check device online failed.\n")
+			return result, errors.New(body)
+		} else {
+			deviceid := readValueInString(string(body), "deviceid")
+			if deviceid == "" {
+				return result, errors.New("设备ID " + deviceID + " 可能不属于你。" + body)
+			} else {
+				result.deviceID = deviceid
+			}
+			name := readValueInString(string(body), "name")
+			if name == "" {
+				return result, errors.New("设备ID " + deviceID + " 可能不属于你。" + body)
+			} else {
+				result.name = name
+			}
+			online := readValueInString(string(body), "online")
+			if online == "true" {
+				result.online = true
+			}
+			if online == "false" {
+				result.online = false
+			}
+			switches := readValueInString(string(body), "switches")
+			//fmt.Println(switches)
+			var switch1 []string
+			if switches != "" {
+				switches = body[strings.Index(body, "switches")+8:]
+				switches = switches[0:strings.Index(switches, "]")]
+				for strings.Index(switches, "switch") > 0 {
+					switch0 := readValueInString(string(switches), "switch")
+					switch1 = append(switch1, switch0)
+					switches = switches[strings.Index(switches, "switch")+6:]
+				}
+				//fmt.Println(result)
+			} else {
+				status := readValueInString(string(body), "switch")
+				switch1 = append(switch1, status)
+			}
+			result.switches = switch1
+			return result, nil
+		}
+	}
 }
 func getDeviceStatus(deviceID string) ([]string, error) {
 	var result []string
@@ -1098,11 +1193,13 @@ func getDeviceStatus(deviceID string) ([]string, error) {
 	}
 }
 func setDeviceStatus(status string, deviceID string, port int) error {
-	id_token, err := findTokenIDofDevice(deviceID)
+	deviceStatus, err := checkDeviceOnline(deviceID)
 	if err != nil {
 		return err
 	}
-	tokenInit(id_token)
+	if ! deviceStatus.online {
+		return errors.New("Device " + deviceID + " is offline.")
+	}
 	head := make(map[string]string)
 	head["X-CK-Appid"] = oauthapp.appID
 	head["Host"] = ewelinkapi.host
@@ -1110,8 +1207,7 @@ func setDeviceStatus(status string, deviceID string, port int) error {
 	head["Authorization"] = "Bearer " + oauthapp.accessToken
 	url := ewelinkapi.scheme + ewelinkapi.host + "/v2/device/thing/status"
 	data := ""
-	tmp, _ := getDeviceStatus(deviceID)
-	if len(tmp) > 1 {
+	if len(deviceStatus.switches) > 1 {
 		if port < 0 {
 			port = 0
 		}
