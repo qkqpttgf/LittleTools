@@ -10,3 +10,6 @@
 4，通过命令`ewectl turnoff xxxxxxxxxx`来关闭。  
 5，可以在crontab中设置好命令来定时开与关。  
 6，可以使用`ewectl web`开启一个简易的网页服务，在网页上操作。  
+
+网页截图：  
+![image](https://github.com/qkqpttgf/LittleTools/assets/45693631/8ecaa13e-bb62-4aa2-82a5-157c1effb79f)  
