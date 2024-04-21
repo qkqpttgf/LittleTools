@@ -1,24 +1,28 @@
 #!/bin/bash
 
-exist_systemctl=$(type systemctl >/dev/null && echo $?)
-if [ g"${exist_systemctl}" = g"0" ]; then
-  echo -e "systemctl \033[92;32mok\033[0m."
-else
+# 挂载位置，可改
+mountPath="/root"
+
+# rclone程序位置与配置位置
+rcloneFile="/usr/bin/rclone"
+configFile="/root/.config/rclone/rclone.conf"
+
+exist_systemctl=$(type systemctl >/dev/null; echo $?)
+if [ g"${exist_systemctl}" != g"0" ]; then
   echo "No systemctl, maybe other OS. exit!"
   exit 0
+else
+  echo -e "systemctl \033[92;32mok\033[0m."
 fi
 
-exist_fuse=$(lsmod | grep fuse)
-if [ g"${exist_fuse}" = g"" ]; then
+#exist_fuse=$(lsmod | grep fuse)
+exist_fuse=$(fusermount -V >/dev/null; echo $?)
+if [ g"${exist_fuse}" != g"0" ]; then
   echo "No FUSE, please check. exit!"
   exit 0
 else
   echo -e "FUSE \033[92;32mok\033[0m."
 fi
-
-rcloneFile="/usr/bin/rclone"
-mountPath="/root"
-configFile="/root/.config/rclone/rclone.conf"
 
 had_lable=$(cat "${configFile}" | grep '\[')
 if [ g"${had_lable}" = g"" ]; then
@@ -35,13 +39,12 @@ Description=Rclone Mount Drive %I
 After=network.target
 
 [Service]
-Type=simple
-#Type=idle
+#Type=simple
+Type=idle
 #PrivateTmp=true
 ExecStartPre=-/usr/bin/umount "${mountPath}/%i"
 ExecStart=${rcloneFile} mount "%i:" "${mountPath}/%i" --allow-non-empty --allow-other --config "${configFile}"
-ExecStop=-/usr/bin/umount -f "${mountPath}/%i"
-#ExecReload=/bin/echo %i r
+#ExecStop=-/usr/bin/umount -f "${mountPath}/%i"
 
 [Install]
 WantedBy=multi-user.target
@@ -53,10 +56,13 @@ lables=$(cat "${configFile}" | grep '\[')
 #echo ${lables}
 for lable in ${lables}; do
   #echo ${lable}
-  drive=${lable:1:${#lable}-2}
-  echo -e "\033[92;93m---------${drive}--------\033[0m"
-  [ ! -d "${mountPath}/${drive}" ] && mkdir -p "${mountPath}/${drive}"
-  systemctl enable rclone@${drive}
-  systemctl start rclone@${drive}
-  systemctl status rclone@${drive} -l
+  if [ ${#lable} -gt 2 ]; then
+    drive=${lable:1:${#lable}-2}
+    echo -e "\n\033[92;93m---------${drive}--------\033[0m"
+    [ ! -d "${mountPath}/${drive}" ] && mkdir -p "${mountPath}/${drive}"
+    systemctl enable rclone@${drive}
+    systemctl start rclone@${drive}
+    sleep 2
+    systemctl status rclone@${drive} -l
+  fi
 done
