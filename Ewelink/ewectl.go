@@ -22,6 +22,7 @@ import (
 	"time"
 )
 
+// 用于处理命令行是什么操作
 var dbFilePath string
 var operateLight string
 var targetLight string
@@ -50,6 +51,7 @@ type OauthApp struct {
 	accessToken string
 }
 var oauthapp OauthApp
+// 读取token与client
 func tokenInit(id int) bool {
 	oauthapp.accessToken, _ = readConfig("token", "accessToken", id)
 	id_client_string, _ := readConfig("token", "clientID", id)
@@ -76,7 +78,7 @@ var isCmdWindow bool
 
 func main() {
 	conlog(passlog("Program Start") + "\n")
-	defer conlog(passlog("Program End") + "\n")
+	defer conlog(warnlog("Program End") + "\n")
 	isCmdWindow = false
 	if runtime.GOOS == "windows" {
 		slash = "\\"
@@ -89,39 +91,51 @@ func main() {
 		slash = "/"
 	}
 	if !parseCommandLine() {
+		// 命令行不是期望的格式
 		conlog(alertlog("command error.") + "\n")
 		useage()
 		return
 	}
 	if !checkDatabase() {
+		// 数据库不对
 		return
 	}
 	apiInit()
 	pass, _ := readConfig("admin", "pass", 0)
-	if pass == "" || startOauth {
-		conlog(warnlog("Please set config on a web page.\n"))
+	if pass == "" {
+		// 初始化设置
+		conlog("Please set config " + warnlog("on a web page") + " in a browser.\n")
 		startTmpSrv()
 		return
 	}
 	if operateLight != "" {
+		// 开关操作
+		conlog(" Turnning " + operateLight + " " + targetLight + "\n")
 		err := turnLight(targetLight, operateLight)
 		if err != nil {
-			conlog("  failed! " + fmt.Sprint(err) + "\n")
+			conlog("  failed!\n  " + fmt.Sprint(err) + "\n")
 		} else {
 			conlog("  success!\n")
 		}
 		return
 	}
 	if startWeb {
+		// 开启一个web页面来操作
 		startSrv()
 		return
 	}
-	useage()
+	if startOauth {
+		// 获取token
+		startTmpSrv()
+		return
+	}
 
+	// 没有指定操作，显示各设备状态
+	useage()
 	dIDs, _ := readConfig("device", "id,deviceID", 0)
 	//fmt.Println(dIDs)
 	if dIDs != "" {
-		deviceIDs := strings.Split(dIDs, "\n")
+		deviceIDs := strSplitLine(dIDs)
 		for _, device1 := range deviceIDs {
 			id := device1[0:strings.Index(device1, "|")]
 			device := device1[strings.Index(device1, "|")+1:]
@@ -230,7 +244,7 @@ func parseCommandLine() bool {
 		todoNum++
 	}
 	if todoNum > 1 {
-		conlog(alertlog("please do one thing in one time\n"))
+		conlog(alertlog("please do only one thing in one time\n"))
 		return false
 	}
 	if dbFilePath == "" {
@@ -243,12 +257,12 @@ func useage() {
 	html := `Useage:
   -c|-config PathOfDBfile   set path of database
   add                       start a web page to add device
-  web                       start a web page
+  web                       start a web page to manage
   turnon ID[:num]           turn on the device
   turnoff ID[:num]          turn off the device
 
 (the ID is device id string or serial number in datebase
-for multi-outlet device, you can use "ID:number" to appoint a channel)
+for multi-outlets device, you can use "ID:number" to appoint a channel)
 
 `
 	//fmt.Print(html)
@@ -257,13 +271,14 @@ for multi-outlet device, you can use "ID:number" to appoint a channel)
 func checkDatabase() bool {
 	createTableSQL := `CREATE TABLE admin (id integer primary key, user char(20), pass char(20));
 CREATE TABLE client (id integer primary key, appID text, appSecret text, appRedirect text);
-CREATE TABLE token (id integer primary key, clientID text, accessToken text, atExpiredTime text, refreshToken text, rtExpiredTime text);
-CREATE TABLE device (id integer primary key, deviceID text, tokenID text);`
+CREATE TABLE device (id integer primary key, deviceID text, tokenID text);
+CREATE TABLE token (id integer primary key, clientID text, accessToken text, atExpiredTime text, refreshToken text, rtExpiredTime text);`
 	_, err := os.Stat(dbFilePath)
 	if err != nil {
-		conlog(warnlog("database file not found, it will be create.\n"))
-		sqlArr := strings.Split(createTableSQL, "\n")
+		conlog("Database file " + alertlog("not found") + ", it will " + warnlog("be created") + ".\n")
+		sqlArr := strSplitLine(createTableSQL)
 		for _, sql := range sqlArr {
+			fmt.Println("  " + sql)
 			_, err = sqlite(sql)
 			if err != nil {
 				conlog(alertlog("Create fail\n") + sql + "\n")
@@ -274,16 +289,37 @@ CREATE TABLE device (id integer primary key, deviceID text, tokenID text);`
 		return true
 	} else {
 		conlog("Checking database.\n")
-		sql, _ := sqlite(".schema")
-		if sql != createTableSQL {
-			conlog(alertlog("Database error\n") + warnlog("  It may not a database for ewectl, or it is an old version.\n  Please remove it to create a new one.\n"))
+		create_Arr := strSplitLine(createTableSQL)
+		databaseOK := false
+		existSql, _ := sqlite(".schema")
+		exist_Arr := strSplitLine(existSql)
+		exist_Map := make(map[string]string)
+		for _, sql := range exist_Arr {
+			if sql != "" {
+				exist_Map[sql] = "1"
+			}
+		}
+		for _, sql := range create_Arr {
+			delete(exist_Map, sql)
+		}
+		if len(exist_Map) == 0 {
+			databaseOK = true
+		}
+
+		if databaseOK {
+			conlog(passlog("Database OK\n"))
+			return true
+		} else {
+			conlog(alertlog("Database Error\n") + warnlog("  It may not a database for ewectl, or it is an old version.\n  Please remove it to create a new one.\n"))
 			//conlog(sql + "\n")
 			return false
-		} else {
-			conlog(passlog("Database ok\n"))
-			return true
 		}
 	}
+}
+func strSplitLine(target string) []string {
+	return strings.FieldsFunc(target, func(r rune) bool {
+        return r == '\r' || r == '\n'
+    })
 }
 
 func conlog(log string) {
@@ -302,7 +338,8 @@ func warnlog(log string) string {
 	if isCmdWindow {
 		return log
 	} else {
-		return fmt.Sprintf("\033[92;93m%s\033[0m", log)
+		//return fmt.Sprintf("\033[92;93m%s\033[0m", log)
+		return fmt.Sprintf("\033[33;33m%s\033[0m", log)
 	}
 }
 func passlog(log string) string {
@@ -310,6 +347,7 @@ func passlog(log string) string {
 		return log
 	} else {
 		return fmt.Sprintf("\033[92;32m%s\033[0m", log)
+		//return fmt.Sprintf("\033[92;60m%s\033[0m", log)
 	}
 }
 
@@ -336,17 +374,16 @@ func startTmpSrv() {
 	} else {
 		conlog("OAuth Server started\n")
 		showListening(port)
-		waitOauth()
+		waitOauth(10 * 60)
 	}
 }
 func showListening(port int) {
-	conlog("Please visit one of url below in a browser.\n")
+	conlog("Please visit one of url(s) below in a browser.\n")
 	for _, ip := range getLocalIPS() {
-		if strings.Index(ip, ":") > -1 {
-			fmt.Printf("  http://[%s]:%d/\n", ip, port)
-		} else {
-			fmt.Printf("  http://%s:%d/\n", ip, port)
+		if strings.Index(ip, ":") > -1 { // ipv6加上中括号
+			ip = "[" + ip + "]"
 		}
+		fmt.Printf("     http://%s:%d/\n", ip, port)
 	}
 }
 func getLocalIPS() []string {
@@ -379,7 +416,7 @@ func getLocalIPS() []string {
 	return ips
 }
 func listenHttp(bindIP string, port int) *http.Server {
-	conlog(fmt.Sprintf("starting http at %v:%d\n", bindIP, port))
+	conlog(fmt.Sprintf("Starting http at %v:%d\n", bindIP, port))
 	srv := &http.Server{Addr: fmt.Sprintf("%v:%d", bindIP, port), Handler: nil}
 	//srv1, err := net.Listen("tcp", fmt.Sprintf("%v:%d", bindIP, port))
 	srv1, err := net.Listen("tcp", srv.Addr)
@@ -393,22 +430,21 @@ func listenHttp(bindIP string, port int) *http.Server {
 }
 func stopSrv(Server *http.Server) {
 	if Server != nil {
-		// elegant graceful
+		// 不强制关闭，会等当前会话结束 // elegant graceful
 		err := Server.Shutdown(context.Background())
 		if err != nil {
 			conlog(fmt.Sprint(err, "\n"))
-		} else {
-			//conlog("  http closed1.\n")
 		}
 		err = Server.Close()
 		if err != nil {
 			conlog(fmt.Sprint(err, "\n"))
 		} else {
-			conlog("  http closed.\n")
+			conlog("http closed.\n")
 		}
 	}
 }
 func waitSYS() {
+	// 等候系统中断，比如按ctrl c
 	sysSignalQuit := make(chan os.Signal, 1)
 	defer close(sysSignalQuit)
 	signal.Notify(sysSignalQuit, syscall.SIGINT, syscall.SIGTERM)
@@ -416,100 +452,94 @@ func waitSYS() {
 	fmt.Print("\n")
 }
 func waitWeb() {
-	count := 0
-	quit = make(chan int, 2)
-	defer close(quit)
-	str := "Waiting visitor..."
-	runstr := []rune(str)
-	go func() {
-		waitSYS()
-		quit <- -2
-	}()
-	for count > -1 {
-		//fmt.Println(count)
-		ctx, cancel := context.WithCancel(context.Background())
-		if count > len(runstr) {
-			count = 0
-			fmt.Print("\r")
-			for i := 0; i < len(str); i++ {
-				fmt.Print(" ")
-			}
-		}
-		fmt.Print("\r" + string(runstr[0:count]))
-		go func() {
-			time.Sleep(1 * time.Second)
-			select {
-				case <- ctx.Done() :
-					return
-				default :
-					quit <- count
-			}
-		}()
-		count = <- quit
-		count++
-		cancel();
-	}
-}
-func waitOauth() {
-	//fmt.Print("Waiting...")
-	defer conlog("Oauth exiting\n")
-	count := 0
-	expireSecond := 10 * 60
-	quit = make(chan int, 2)
+	quit = make(chan int, 1)
 	defer close(quit)
 	go func() {
 		waitSYS()
 		quit <- -1
 	}()
+	// 底部跑马灯文字
+	go displayHorseRaceLamp()
+	// 等ctrl c
+	<- quit
+}
+// 等OAuth流程，超时后程序直接结束，避免下次运行还在占用端口
+// 每次访问后刷新超时时间
+func waitOauth(expireSecond int) {
+	defer conlog("OAuth exiting\n")
+	count := 0
+	quit = make(chan int, 1)
+	defer close(quit)
 	go func() {
-		loop := make(chan int, 1)
-		str := "Waiting..."
-		runstr := []rune(str)
-		for count > -1 {
-			//fmt.Println(count)
-			ctx, cancel := context.WithCancel(context.Background())
-			if count > len(runstr) {
-				count = 0
-				fmt.Print("\r")
-				for i := 0; i < len(str); i++ {
-					fmt.Print(" ")
-				}
-			}
-			fmt.Print("\r" + string(runstr[0:count]))
-			go func() {
-				time.Sleep(1 * time.Second)
-				select {
-					case <- ctx.Done() :
-						return
-					default :
-						loop <- count
-				}
-			}()
-			count = <- loop
-			count++
-			cancel();
-		}
+		waitSYS()
+		quit <- -1
 	}()
+	// 底部跑马灯文字
+	go displayHorseRaceLamp()
+	// 判断超时
 	for count > -1 {
 		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			time.Sleep(time.Second * time.Duration(expireSecond))
+			// 超时时间后判断当前ctx是否存活
 			select {
 				case <- ctx.Done() :
+					// ctx被杀掉了，说明有其它地方给quit传值了
+					// 本routine结束不做操作
 					return
 				default :
+					// ctx存活，说明其它地方无操作
+					// 超时，给通道传值结束程序
 					conlog("Timeout\n")
 					quit <- -1
 			}
 		}()
+		// 等待网页路由触发传值，或上方Sleep后传值
 		count = <- quit
+		// 有值传入后，结束本次ctx，开始下一次循环
 		cancel();
 	}
+}
+// 跑马灯显示字符，死循环，未考虑结束
+func displayHorseRaceLamp() {
+	str := "Waiting visitor ..."
+	runstr := []rune(str) // 以防有中文字
+	//fmt.Println(len(str), len(runstr))
+	count := 0
+	for count > -1 {
+		//fmt.Println(count)
+		if count > len(runstr) {
+			count = 0
+			fmt.Print("\r")
+			width := screenWidth()
+			if width == 0 {
+				width = len(str)
+			}
+			for i := 0; i < width; i++ {
+				fmt.Print(" ")
+			}
+		}
+		fmt.Print("\r" + string(runstr[0:count]))
+		time.Sleep(1 * time.Second)
+		count++
+	}
+}
+func screenWidth() int {
+	cmd := exec.Command("tput", "cols")
+	result_b, err := cmd.Output()
+	if err == nil {
+		result := strings.TrimSpace(string(result_b))
+		width, err := strconv.Atoi(result)
+		if err == nil {
+			return width
+		}
+	}
+	return 0
 }
 
 func route(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	quit <- 0
+	//quit <- 0
 	r.ParseForm()
 	//r.TLS != nil
 	conlog(warnlog(fmt.Sprintln(r.Method, r.URL)))
@@ -532,19 +562,11 @@ func route(w http.ResponseWriter, r *http.Request) {
 	if checkAdminShowLoginPage(w, r) {
 		if data.Get("device") != "" && (data.Get("action") == "on" || data.Get("action") == "off") {
 			httpCode := 200
-			//err := turnLight(data.Get("device"), data.Get("action"))
-			port := -1
+			device := data.Get("device")
 			if data.Get("outlet") != "" {
-				port1, err := strconv.Atoi(data.Get("outlet"))
-				//fmt.Println(port1)
-				if err != nil {
-					htmlOutput(w, "通道号 \"" + data.Get("outlet") + "\"错误，需要数字", 400, nil)
-					return
-				}
-				port = port1
-				//fmt.Println(port)
+				device += ":" + data.Get("outlet")
 			}
-			err := setDeviceStatus(data.Get("action"), data.Get("device"), port)
+			err := turnLight(device, data.Get("action"))
 			if err != nil {
 				html += "  failed! " + fmt.Sprint(err) + "\n"
 				httpCode = 400
@@ -556,7 +578,7 @@ func route(w http.ResponseWriter, r *http.Request) {
 		} else {
 			dIDs, _ := readConfig("device", "id,deviceID", 0)
 			//fmt.Println(dIDs)
-			deviceIDs := strings.Split(dIDs, "\n")
+			deviceIDs := strSplitLine(dIDs)
 			for _, device1 := range deviceIDs {
 				id := device1[0:strings.Index(device1, "|")]
 				device := device1[strings.Index(device1, "|")+1:]
@@ -981,7 +1003,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 `
 			result, err := readConfig("client", "id,appID", 0)
 			if err == nil && result != "" {
-				apps := strings.Split(result, "\n")
+				apps := strSplitLine(result)
 				for _, app := range apps {
 					id := app[0:strings.Index(app, "|")]
 					appID := app[strings.Index(app, "|")+1:]
@@ -1032,7 +1054,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 			if err == nil && result != "" {
 				html += `<br>或者在已有账号中添加设备：<br>
 <form action="" method="post" name="form1" onsubmit="return check(this);">`
-				id_tokens := strings.Split(result, "\n")
+				id_tokens := strSplitLine(result)
 				for _, id_token := range id_tokens {
 					html += `
 	<label>
@@ -1040,7 +1062,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 					sql := "select deviceID from device where tokenID=" + id_token + ";"
 					result, err = sqlite(sql)
 					if err == nil && result != "" {
-						deviceIDs := strings.Split(result, "\n")
+						deviceIDs := strSplitLine(result)
 						for _, deviceID := range deviceIDs {
 							html += deviceID + ", "
 						}
@@ -1073,7 +1095,7 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 
 func turnLight(deviceID string, turn string) error {
 	if turn != "on" && turn != "off" {
-		return errors.New("invalid operate: \"" + turn + "\"")
+		return errors.New("Invalid operate: \"" + turn + "\"")
 	}
 	port := -1
 	if strings.Index(deviceID, ":") > 0 {
@@ -1483,7 +1505,7 @@ func findConfig(table string, key string, value string) []int {
 		ids = append(ids, -1)
 		return ids
 	}
-	id_arr := strings.Split(id_string, "\n")
+	id_arr := strSplitLine(id_string)
 	for _, id1 := range id_arr {
 		id, err := strconv.Atoi(id1)
 		if err != nil {
@@ -1652,6 +1674,7 @@ func curl(method string, url string, data string, header map[string]string) (Htt
 		fmt.Println(err)
 	} else {
 		//fmt.Println(res)
+		header["User-Agent"] = "ysun"
 		for k, v := range header {
 			req.Header.Add(k, v)
 		}
