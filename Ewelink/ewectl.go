@@ -1501,7 +1501,7 @@ func findConfig(table string, key string, value string) []int {
 	}
 	sql := "select id from " + table + " where " + key + "=\"" + value + "\";"
 	id_string, err := sqlite(sql);
-	if err != nil {
+	if err != nil || id_string == "" {
 		ids = append(ids, -1)
 		return ids
 	}
