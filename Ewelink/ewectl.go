@@ -28,6 +28,7 @@ var operateLight string
 var targetLight string
 var startWeb bool
 var startOauth bool
+var status bool
 
 type EwelinkAPI struct {
 	scheme string
@@ -130,48 +131,45 @@ func main() {
 		return
 	}
 
-	// 没有指定操作，显示各设备状态
-	useage()
-	dIDs, _ := readConfig("device", "id,deviceID", 0)
-	//fmt.Println(dIDs)
-	if dIDs != "" {
-		deviceIDs := strSplitLine(dIDs)
-		for _, device1 := range deviceIDs {
-			id := device1[0:strings.Index(device1, "|")]
-			device := device1[strings.Index(device1, "|")+1:]
-			//fmt.Println(device)
-			deviceStatus, err := checkDeviceOnline(device)
-			tmp := ""
-			if err != nil {
-				tmp = fmt.Sprint(err)
-			} else {
-				if deviceStatus.online {
-					if len(deviceStatus.switches) > 1 {
-						for i, s := range deviceStatus.switches {
-							tmp += "chanel_" + fmt.Sprint(i) + " " + s + ", "
-						}
-						tmp = tmp[0:len(tmp)-2]
-					} else {
-						tmp = deviceStatus.switches[0]
-					}
+	if status {
+		dIDs, _ := readConfig("device", "id,deviceID", 0)
+		//fmt.Println(dIDs)
+		if dIDs != "" {
+			deviceIDs := strSplitLine(dIDs)
+			for _, device1 := range deviceIDs {
+				id := device1[0:strings.Index(device1, "|")]
+				device := device1[strings.Index(device1, "|")+1:]
+				//fmt.Println(device)
+				deviceStatus, err := checkDeviceOnline(device)
+				tmp := ""
+				if err != nil {
+					tmp = fmt.Sprint(err)
 				} else {
-					tmp = "offline"
+					if deviceStatus.online {
+						if len(deviceStatus.switches) > 1 {
+							for i, s := range deviceStatus.switches {
+								tmp += "chanel_" + fmt.Sprint(i) + " " + s + ", "
+							}
+							tmp = tmp[0:len(tmp)-2]
+						} else {
+							tmp = deviceStatus.switches[0]
+						}
+					} else {
+						tmp = "offline"
+					}
 				}
+				conlog(id + ", " + device + ", " + deviceStatus.name + ": " + tmp + "\n")
 			}
-			conlog(id + ", " + device + ", " + deviceStatus.name + ": " + tmp + "\n")
+		} else {
+			conlog(alertlog("No devices, OAuth start.") + "\n")
+			startTmpSrv()
 		}
-	} else {
-		conlog(alertlog("No devices, OAuth start.") + "\n")
-		startTmpSrv()
+		return
 	}
+
+	// 没有指定操作，显示用法
+	useage()
 	return
-	/*fmt.Printf("Press any key to exit...\n")
-	exec.Command("stty","-F","/dev/tty","cbreak","min","1").Run()
-	exec.Command("stty","-F","/dev/tty","-echo").Run()
-	defer exec.Command("stty","-F","/dev/tty","echo").Run()
-	b := make([]byte, 1)
-	os.Stdin.Read(b)*/
-	//fmt.Println(a,b)
 }
 
 func parseCommandLine() bool {
@@ -181,6 +179,16 @@ func parseCommandLine() bool {
 	conlog("Commands:\n")
 	for argc, argv := range os.Args {
 		fmt.Printf("  %d: %v\n", argc, argv)
+		if turnLight1 {
+			targetLight = argv
+			turnLight1 = false
+			continue
+		}
+		if configFile {
+			dbFilePath = argv
+			configFile = false
+			continue
+		}
 		if argc == 0 {
 			softPath = argv
 			pos := strings.LastIndex(softPath, slash)
@@ -191,12 +199,16 @@ func parseCommandLine() bool {
 			}
 			continue
 		}
-		if argv == "web" {
-			startWeb = true
-			continue
-		}
 		if argv == "add" {
 			startOauth = true
+			continue
+		}
+		if argv == "status" {
+			status = true
+			continue
+		}
+		if argv == "web" {
+			startWeb = true
 			continue
 		}
 		if len(argv) > 4 {
@@ -206,18 +218,8 @@ func parseCommandLine() bool {
 				continue
 			}
 		}
-		if turnLight1 {
-			targetLight = argv
-			turnLight1 = false
-			continue
-		}
 		if argv == "-config" || argv == "-c" {
 			configFile = true
-			continue
-		}
-		if configFile {
-			dbFilePath = argv
-			configFile = false
 			continue
 		}
 
@@ -243,6 +245,9 @@ func parseCommandLine() bool {
 	if startOauth {
 		todoNum++
 	}
+	if status {
+		todoNum++
+	}
 	if todoNum > 1 {
 		conlog(alertlog("please do only one thing in one time\n"))
 		return false
@@ -255,11 +260,13 @@ func parseCommandLine() bool {
 }
 func useage() {
 	html := `Useage:
+` + os.Args[0] + ` [-c path/datafile] [add | status | web | turnon ID | turnoff ID]
   -c|-config PathOfDBfile   set path of database
   add                       start a web page to add device
-  web                       start a web page to manage
+  status                    list status of devices
   turnon ID[:num]           turn on the device
   turnoff ID[:num]          turn off the device
+  web                       start a web page to manage
 
 (the ID is device id string or serial number in datebase
 for multi-outlets device, you can use "ID:number" to appoint a channel)
@@ -267,6 +274,19 @@ for multi-outlets device, you can use "ID:number" to appoint a channel)
 `
 	//fmt.Print(html)
 	conlog(html)
+	expireSecond := 10
+	go displayCountdown("Please press ctrl+c or just wait ", expireSecond, "s.")
+	quit = make(chan int, 1)
+	defer close(quit)
+	go func() {
+		waitSYS()
+		quit <- -1
+	}()
+	go func() {
+		time.Sleep(time.Second * time.Duration(expireSecond))
+		quit <- -1
+	}()
+	<- quit
 }
 func checkDatabase() bool {
 	createTableSQL := `CREATE TABLE admin (id integer primary key, user char(20), pass char(20));
@@ -510,11 +530,11 @@ func displayHorseRaceLamp() {
 		//fmt.Println(count)
 		if count > len(runstr) {
 			count = 0
-			fmt.Print("\r")
 			width := screenWidth()
 			if width == 0 {
 				width = len(str)
 			}
+			fmt.Print("\r")
 			for i := 0; i < width; i++ {
 				fmt.Print(" ")
 			}
@@ -524,14 +544,46 @@ func displayHorseRaceLamp() {
 		count++
 	}
 }
+// 倒计时
+func displayCountdown(pre string, expireSecond int, aft string) {
+	for expireSecond > -1 {
+		str := pre + fmt.Sprint(expireSecond) + aft
+		width := screenWidth()
+		if width == 0 {
+			width = len(str)
+		}
+		fmt.Print("\r")
+		for i := 0; i < width; i++ {
+			fmt.Print(" ")
+		}
+		fmt.Print("\r" + str)
+		time.Sleep(1 * time.Second)
+		expireSecond--
+	}
+}
 func screenWidth() int {
-	cmd := exec.Command("tput", "cols")
-	result_b, err := cmd.Output()
-	if err == nil {
-		result := strings.TrimSpace(string(result_b))
-		width, err := strconv.Atoi(result)
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("mode", "con")
+		result_b, err := cmd.Output()
 		if err == nil {
-			return width
+			result_a := strings.Split(string(result_b), ":")
+			result := result_a[3]
+			result = strSplitLine(result)[0]
+			result = result[strings.LastIndex(result, " ")+1:]
+			width, err := strconv.Atoi(result)
+			if err == nil {
+				return width
+			}
+		}
+	} else {
+		cmd := exec.Command("tput", "cols")
+		result_b, err := cmd.Output()
+		if err == nil {
+			result := strings.TrimSpace(string(result_b))
+			width, err := strconv.Atoi(result)
+			if err == nil {
+				return width
+			}
 		}
 	}
 	return 0
