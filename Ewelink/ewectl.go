@@ -97,6 +97,10 @@ func main() {
 		useage()
 		return
 	}
+	if !existSqlite() {
+		conlog("something wrong with sqlite3!\n")
+		return
+	}
 	if !checkDatabase() {
 		// 数据库不对
 		return
@@ -275,7 +279,7 @@ for multi-outlets device, you can use "ID:number" to appoint a channel)
 	//fmt.Print(html)
 	conlog(html)
 	expireSecond := 10
-	go displayCountdown("Please press ctrl+c or just wait ", expireSecond, "s.")
+	go displayCountdown("Please press ctrl+c or just wait ", expireSecond, "s to exit.")
 	quit = make(chan int, 1)
 	defer close(quit)
 	go func() {
@@ -305,12 +309,11 @@ CREATE TABLE token (id integer primary key, clientID text, accessToken text, atE
 				return false
 			}
 		}
-		conlog(passlog("Create done.\n"))
+		conlog(passlog("Database created.\n"))
 		return true
 	} else {
 		conlog("Checking database.\n")
 		create_Arr := strSplitLine(createTableSQL)
-		databaseOK := false
 		existSql, _ := sqlite(".schema")
 		exist_Arr := strSplitLine(existSql)
 		exist_Map := make(map[string]string)
@@ -323,15 +326,10 @@ CREATE TABLE token (id integer primary key, clientID text, accessToken text, atE
 			delete(exist_Map, sql)
 		}
 		if len(exist_Map) == 0 {
-			databaseOK = true
-		}
-
-		if databaseOK {
 			conlog(passlog("Database OK\n"))
 			return true
 		} else {
 			conlog(alertlog("Database Error\n") + warnlog("  It may not a database for ewectl, or it is an old version.\n  Please remove it to create a new one.\n"))
-			//conlog(sql + "\n")
 			return false
 		}
 	}
@@ -527,38 +525,34 @@ func displayHorseRaceLamp() {
 	//fmt.Println(len(str), len(runstr))
 	count := 0
 	for count > -1 {
-		//fmt.Println(count)
-		if count > len(runstr) {
-			count = 0
-			width := screenWidth()
-			if width == 0 {
-				width = len(str)
-			}
-			fmt.Print("\r")
-			for i := 0; i < width; i++ {
-				fmt.Print(" ")
-			}
-		}
 		fmt.Print("\r" + string(runstr[0:count]))
 		time.Sleep(1 * time.Second)
 		count++
+		//fmt.Println(count)
+		if count > len(runstr) {
+			count = 0
+			clearCurrentLine(str)
+		}
 	}
 }
 // 倒计时
 func displayCountdown(pre string, expireSecond int, aft string) {
 	for expireSecond > -1 {
 		str := pre + fmt.Sprint(expireSecond) + aft
-		width := screenWidth()
-		if width == 0 {
-			width = len(str)
-		}
-		fmt.Print("\r")
-		for i := 0; i < width; i++ {
-			fmt.Print(" ")
-		}
 		fmt.Print("\r" + str)
 		time.Sleep(1 * time.Second)
+		clearCurrentLine(str)
 		expireSecond--
+	}
+}
+func clearCurrentLine(str string) {
+	width := screenWidth()
+	if width == 0 {
+		width = len(str)
+	}
+	fmt.Print("\r")
+	for i := 0; i < width; i++ {
+		fmt.Print(" ")
 	}
 }
 func screenWidth() int {
@@ -572,6 +566,9 @@ func screenWidth() int {
 			result = result[strings.LastIndex(result, " ")+1:]
 			width, err := strconv.Atoi(result)
 			if err == nil {
+				if isCmdWindow {
+					width--
+				}
 				return width
 			}
 		}
@@ -1455,6 +1452,22 @@ func RefreshToken(id int) error {
 }
 	//content, err := ioutil.ReadFile(dbFilePath)
 	//return ioutil.WriteFile(dbFilePath, []byte(str), 0666)
+func existSqlite() bool {
+	conlog("Checking sqlite3: ")
+	cmd := exec.Command("sqlite3", "--version")
+	result_b, err := cmd.Output()
+	result := strings.TrimSpace(string(result_b))
+	result = strings.TrimRight(result, "\n")
+	if err != nil {
+		fmt.Println(alertlog("error") + "!")
+		fmt.Println(err)
+		return false
+	} else {
+		fmt.Println(passlog("done") + ".")
+		fmt.Println(string(result))
+		return true
+	}
+}
 func sqlite(str string) (string, error) {
 	//fmt.Println(str)
 	result := ""
