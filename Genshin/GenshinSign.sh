@@ -101,12 +101,13 @@ function sign {
   data1='{"act_id":"'${act_id}'","region":"'${region}'","uid":"'${game_uid}'"}'
   #echo ${data1}
   #    salt1="9nQiU3AV0rJSIBWgdynfoGMGKaklfbM7"
-  salt1="YVEIkzDFNHLeKXLxzqCA9TzxCpWwbIbk"
+  #salt1="YVEIkzDFNHLeKXLxzqCA9TzxCpWwbIbk"
+  salt1="rtvTthKxEyreVXQCnhluFgLXPOFKPHlA"
   time1=$(date +%s)
-  random1="818465" #随机6个字母与数字
+  random1="ysun65" #随机6个字母与数字
   md51=$(echo -n "salt=${salt1}&t=${time1}&r=${random1}" | md5sum)
   md51=${md51%% *}
-  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.36.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.36.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -H "x-rpc-signgame: ${signgame}" -w %{http_code})
+  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.71.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.71.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -H "x-rpc-signgame: ${signgame}" -H "X-Requested-With: com.mihoyo.hyperion" -w %{http_code})
   #echo ${signResult}
   signcode=${signResult:0-3}
   if [ g"${signcode}" = g"200" ]; then
@@ -186,7 +187,7 @@ function startSign {
       exit 0
     else
       i1=0
-      while [ $i1 -lt 2 ]; do
+      while [ $i1 -lt 3 ]; do
         if [ $i1 -eq 0 ]; then
           echo -n "原神，"
           msg="${msg}\n原神"
@@ -229,6 +230,24 @@ function startSign {
             signUrl="https://sg-public-api.hoyolab.com/event/luna/sign"
             act_id="e202303301540311"
             signgame="hkrpg"
+          fi
+        fi
+        if [ $i1 -eq 2 ]; then
+          echo -n "绝区零，"
+          msg="${msg}\n绝区零"
+          if [ g"${configRegion}" = g"cn" ]; then
+            getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=nap_cn"
+            checkSignUrl="https://act-nap-api.mihoyo.com/event/luna/zzz/info"
+            signUrl="https://act-nap-api.mihoyo.com/event/luna/zzz/sign"
+            act_id="e202406242138391"
+            signgame="nap"
+          fi
+          if [ g"${configRegion}" = g"global" ]; then
+            getRoleUrl="https://sg-public-api.hoyolab.com/binding/api/getUserGameRolesByLtoken?game_biz=nap_global"
+            checkSignUrl="https://sg-public-api.hoyolab.com/event/luna/zzz/info"
+            signUrl="https://sg-public-api.hoyolab.com/event/luna/zzz/sign"
+            act_id="e202406031448091"
+            signgame="nap"
           fi
         fi
         if [ g"${getRoleUrl}" = g"" ]; then
