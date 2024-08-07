@@ -7,7 +7,10 @@ mountPath="/root"
 rcloneFile="/usr/bin/rclone"
 configFile="/root/.config/rclone/rclone.conf"
 
-exist_systemctl=$(type systemctl >/dev/null; echo $?)
+exist_systemctl=$(
+  type systemctl >/dev/null
+  echo $?
+)
 if [ g"${exist_systemctl}" != g"0" ]; then
   echo "No systemctl, maybe other OS. exit!"
   exit 0
@@ -15,8 +18,10 @@ else
   echo -e "systemctl \033[92;32mok\033[0m."
 fi
 
-#exist_fuse=$(lsmod | grep fuse)
-exist_fuse=$(fusermount -V >/dev/null; echo $?)
+exist_fuse=$(
+  fusermount -V >/dev/null
+  echo $?
+)
 if [ g"${exist_fuse}" != g"0" ]; then
   echo "No FUSE, please check. exit!"
   exit 0
@@ -39,12 +44,13 @@ Description=Rclone Mount Drive %I
 After=network.target
 
 [Service]
-#Type=simple
-Type=idle
-#PrivateTmp=true
+#Type=idle
+Type=simple
+ExecStartPre=-/usr/bin/mkdir -p "${mountPath}/%i"
 ExecStartPre=-/usr/bin/umount "${mountPath}/%i"
 ExecStart=${rcloneFile} mount "%i:" "${mountPath}/%i" --allow-non-empty --allow-other --config "${configFile}"
-#ExecStop=-/usr/bin/umount -f "${mountPath}/%i"
+ExecStop=-/usr/bin/umount -f "${mountPath}/%i"
+#ExecStopPost=-/usr/bin/rm -rf "${mountPath}/%i"
 
 [Install]
 WantedBy=multi-user.target
@@ -59,9 +65,9 @@ for lable in ${lables}; do
   if [ ${#lable} -gt 2 ]; then
     drive=${lable:1:${#lable}-2}
     echo -e "\n\033[92;93m---------${drive}--------\033[0m"
-    [ ! -d "${mountPath}/${drive}" ] && mkdir -p "${mountPath}/${drive}"
-    systemctl enable rclone@${drive}
+    echo -e "If stoping at \"\033[92;93mlines xxx (END)\033[0m\", please \033[92;93mPRESS q\033[0m.\n"
     systemctl start rclone@${drive}
+    systemctl enable rclone@${drive}
     sleep 2
     systemctl status rclone@${drive} -l
   fi
