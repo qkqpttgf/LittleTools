@@ -279,15 +279,11 @@ for multi-outlets device, you can use "ID:number" to appoint a channel)
 	//fmt.Print(html)
 	conlog(html)
 	expireSecond := 10
-	go displayCountdown("Please press ctrl+c or just wait ", expireSecond, "s to exit.")
 	quit = make(chan int, 1)
 	defer close(quit)
+	go displayCountdown("Please press ctrl+c or just wait ", expireSecond, "s to exit.", quit)
 	go func() {
 		waitSYS()
-		quit <- -1
-	}()
-	go func() {
-		time.Sleep(time.Second * time.Duration(expireSecond))
 		quit <- -1
 	}()
 	<- quit
@@ -536,7 +532,7 @@ func displayHorseRaceLamp() {
 	}
 }
 // 倒计时
-func displayCountdown(pre string, expireSecond int, aft string) {
+func displayCountdown(pre string, expireSecond int, aft string, quit chan int) {
 	for expireSecond > -1 {
 		str := pre + fmt.Sprint(expireSecond) + aft
 		fmt.Print("\r" + str)
@@ -544,6 +540,7 @@ func displayCountdown(pre string, expireSecond int, aft string) {
 		clearCurrentLine(str)
 		expireSecond--
 	}
+	quit <- -1
 }
 func clearCurrentLine(str string) {
 	width := screenWidth()
@@ -1455,16 +1452,14 @@ func RefreshToken(id int) error {
 func existSqlite() bool {
 	conlog("Checking sqlite3: ")
 	cmd := exec.Command("sqlite3", "--version")
-	result_b, err := cmd.Output()
-	result := strings.TrimSpace(string(result_b))
-	result = strings.TrimRight(result, "\n")
+	result, err := cmd.Output()
 	if err != nil {
-		fmt.Println(alertlog("error") + "!")
+		fmt.Println(alertlog("error") + "!", result)
 		fmt.Println(err)
 		return false
 	} else {
 		fmt.Println(passlog("done") + ".")
-		fmt.Println(string(result))
+		//fmt.Println(strings.TrimRight(string(result), "\n"))
 		return true
 	}
 }
