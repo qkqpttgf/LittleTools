@@ -107,7 +107,7 @@ function sign {
   random1="ysun65" #随机6个字母与数字
   md51=$(echo -n "salt=${salt1}&t=${time1}&r=${random1}" | md5sum)
   md51=${md51%% *}
-  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.71.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.71.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -H "x-rpc-signgame: ${signgame}" -H "X-Requested-With: com.mihoyo.hyperion" -w %{http_code})
+  signResult=$(curl -s "${signUrl}" -d "${data1}" -H "User-Agent: Android; miHoYoBBS/2.71.1" -H "Cookie: ${cookie}" -H "Content-Type: application/json" -H "x-rpc-device_id: F84E53D45BFE4424ABEA9D6F0205FF4A" -H "x-rpc-app_version: 2.71.1" -H "x-rpc-client_type: 5" -H "DS: ${time1},${random1},${md51}" -H "x-rpc-signgame: ${signgame}" -w %{http_code})
   #echo ${signResult}
   signcode=${signResult:0-3}
   if [ g"${signcode}" = g"200" ]; then
@@ -238,9 +238,11 @@ function startSign {
           if [ g"${configRegion}" = g"cn" ]; then
             getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=nap_cn"
             checkSignUrl="https://act-nap-api.mihoyo.com/event/luna/zzz/info"
+            #checkSignUrl="https://api-takumi.mihoyo.com/event/luna/info"
             signUrl="https://act-nap-api.mihoyo.com/event/luna/zzz/sign"
+            #signUrl="https://api-takumi.mihoyo.com/event/luna/sign"
             act_id="e202406242138391"
-            signgame="nap"
+            signgame="zzz"
           fi
           if [ g"${configRegion}" = g"global" ]; then
             getRoleUrl="https://sg-public-api.hoyolab.com/binding/api/getUserGameRolesByLtoken?game_biz=nap_global"
