@@ -187,8 +187,26 @@ function startSign {
       exit 0
     else
       i1=0
-      while [ $i1 -lt 3 ]; do
+      while [ $i1 -lt 4 ]; do
         if [ $i1 -eq 0 ]; then
+          echo -n "崩坏3，"
+          msg="${msg}\n崩坏3"
+          if [ g"${configRegion}" = g"cn" ]; then
+            getRoleUrl="https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=bh3_cn"
+            checkSignUrl="https://api-takumi.mihoyo.com/event/luna/info"
+            signUrl="https://api-takumi.mihoyo.com/event/luna/sign"
+            act_id="e202306201626331"
+            signgame="bh3"
+          fi
+          if [ g"${configRegion}" = g"global" ]; then
+            getRoleUrl="https://api-os-takumi.mihoyo.com/binding/api/getUserGameRolesByLtoken?game_biz=bh3_global"
+            checkSignUrl="https://sg-hk4e-api.hoyolab.com/event/luna/info"
+            signUrl="https://sg-hk4e-api.hoyolab.com/event/luna/sign"
+            act_id="e202110291205111"
+            signgame="bh3"
+          fi
+        fi
+        if [ $i1 -eq 1 ]; then
           echo -n "原神，"
           msg="${msg}\n原神"
           if [ g"${configRegion}" = g"cn" ]; then
@@ -211,7 +229,7 @@ function startSign {
             signgame="hk4e"
           fi
         fi
-        if [ $i1 -eq 1 ]; then
+        if [ $i1 -eq 2 ]; then
           echo -n "星穹铁道，"
           msg="${msg}\n星穹铁道"
           if [ g"${configRegion}" = g"cn" ]; then
@@ -232,7 +250,7 @@ function startSign {
             signgame="hkrpg"
           fi
         fi
-        if [ $i1 -eq 2 ]; then
+        if [ $i1 -eq 3 ]; then
           echo -n "绝区零，"
           msg="${msg}\n绝区零"
           if [ g"${configRegion}" = g"cn" ]; then
@@ -249,7 +267,8 @@ function startSign {
             checkSignUrl="https://sg-public-api.hoyolab.com/event/luna/zzz/info"
             signUrl="https://sg-public-api.hoyolab.com/event/luna/zzz/sign"
             act_id="e202406031448091"
-            signgame="nap"
+            #signgame="nap"
+            signgame="zzz"
           fi
         fi
         if [ g"${getRoleUrl}" = g"" ]; then
