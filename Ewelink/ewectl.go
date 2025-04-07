@@ -22,6 +22,10 @@ import (
 	"time"
 )
 
+var programName string
+var programVersion string
+var programAuthor string
+
 // 用于处理命令行是什么操作
 var dbFilePath string
 var operateLight string
@@ -80,6 +84,10 @@ var isCmdWindow bool
 func main() {
 	conlog(passlog("Program Start") + "\n")
 	defer conlog(warnlog("Program End") + "\n")
+	programName = "ewectl"
+	programVersion = "0.1.0"
+	programAuthor = "ysun"
+
 	isCmdWindow = false
 	if runtime.GOOS == "windows" {
 		slash = "\\"
@@ -312,6 +320,9 @@ CREATE TABLE token (id integer primary key, clientID text, accessToken text, atE
 		create_Arr := strSplitLine(createTableSQL)
 		existSql, _ := sqlite(".schema")
 		exist_Arr := strSplitLine(existSql)
+		if len(create_Arr) != len(exist_Arr) {
+			return false
+		}
 		exist_Map := make(map[string]string)
 		for _, sql := range exist_Arr {
 			if sql != "" {
@@ -325,7 +336,7 @@ CREATE TABLE token (id integer primary key, clientID text, accessToken text, atE
 			conlog(passlog("Database OK\n"))
 			return true
 		} else {
-			conlog(alertlog("Database Error\n") + warnlog("  It may not a database for ewectl, or it is an old version.\n  Please remove it to create a new one.\n"))
+			conlog(alertlog("Database Error\n") + warnlog("  It may not a database for " + programName + ", or it is an old version.\n  Please remove it to create a new one.\n"))
 			return false
 		}
 	}
@@ -367,7 +378,7 @@ func passlog(log string) string {
 
 func startSrv() {
 	http.HandleFunc("/", route)
-	port := 60575
+	port := wizAport() //60575
 	Server := listenHttp("", port)
 	defer stopSrv(Server)
 	if Server == nil {
@@ -380,7 +391,7 @@ func startSrv() {
 }
 func startTmpSrv() {
 	http.HandleFunc("/", oauthroute)
-	port := 60576
+	port := wizAport()+1 //60576
 	Server := listenHttp("", port)
 	defer stopSrv(Server)
 	if Server == nil {
@@ -802,7 +813,8 @@ func oauthroute(w http.ResponseWriter, r *http.Request) {
 		//data:image/png;base64,
 		png := "iVBORw0KGgoAAAANSUhEUgAAACgAAAAYCAYAAACIhL/AAAAAAXNSR0IArs4c6QAAAoxJREFUWEftlk1IFGEYx3/PrGaXQkU6hOi4s6mHoEAqOnTykERCFztUl0ioJDp08uCtU6cSooQKAoMuUUEURgV6q8DoGLTzrpEIUmgddkFc58kZZ5dpcz9gV/Pg3Obl/z7v7/0/HzPCFn9ki/OxDVhthjbVQU0kdpPNHkVkRwj+i+bm9zI9vVzsIpsLCILjXEH1JhADMnjeCZmZmdoSgD6E9vTUs7h4CxgKoR7Q1nZJJiez60FuqoM5ALXtbmKxd6juBb4DvWLM17KA2tW1i+XlQVR9+8cllZqPbgpqyPMOAceARkRcVCcwxhXwKm0ITSQa8LxxYCDYozogqdSTkoDa2dlCNvsSOBxuMoj0RW+mjnMV1dF/AolMIXJBkkm3YkjHGVk14nqovyHGDJcGtO3jWNZEgWhIjLmbT00xwDXBT1TPSCr1phLIvy4rcg/XvSighXvzNajxeC/wOuyunK4Y4O8ACNqA+khQf/2sGONnouRTkI1XpNOnZX4+XRxwrb4eAf2h6DOW1S/J5GzewY6OdmKxjCSTP/IdubBwCpE7QEuoKwup/riJx29HOnlMjLlcvklseydwhLo6IZP5KHNzmXJOBKDx+D7gKbA/1JdMt9q2jWW9XW1Ep+IarASklEYTiVY87wVwMNRlEBmmsXEs+qUIJ0E0UyuInBTXLaz/IExN52DozLMIpH/GN+AxIh9QPbD6fh5oj1z2E5bVlyubojVYrYP5Ol1LXyFksfC+e4Piug+LCWrqYB7Scfagej/ScOudvwKM0tQ0/F9+FtRvOJFziIwUpDSX9msY87zcF2hDHIzaFYyU1tYmGhq6g/WlpS/Mzi6uN5TLjpla1WEt42y4g9XCbgNW6+AfkjjwGQmEbKUAAAAASUVORK5CYII="
 		png1, _ := base64.StdEncoding.DecodeString(png)
-		binOutput(w, png1, 200, nil)
+		//binOutput(w, png1, 200, nil)
+		htmlOutput(w, string(png1), 200, map[string]string {"Content-Type": "image/png"})
 		return
 	}
 	fmt.Print("\r")
@@ -1661,6 +1673,15 @@ func ComputeHmac256(message string, secret string) string {
     h.Write([]byte(message))
     return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
+func wizAport() int {
+	sum := 1
+	nums := []byte(programName)
+	for _, num := range nums {
+		sum *= int(num)
+	}
+	sum = 50000 + sum % 10000
+	return sum
+}
 func binOutput(w http.ResponseWriter, body []byte, code int, head map[string]string) {
 	//w.Header().Set("Content-Type", "application/stream")
 	w.Header().Set("Content-Type", "image/png")
@@ -1671,15 +1692,28 @@ func binOutput(w http.ResponseWriter, body []byte, code int, head map[string]str
 	w.Write([]byte(body))
 }
 func htmlOutput(w http.ResponseWriter, body string, code int, head map[string]string) {
-	w.Header().Set("Content-Type", "text/html")
-	for k, v := range head {
-		w.Header().Add(k, v)
+	if head == nil {
+		head = make(map[string]string)
 	}
-	w.WriteHeader(code)
+	_, ok := head["Content-Type"]
+	if ok && strings.Index(head["Content-Type"], "text/html")<0 {
+	} else {
+		if ok {
+			w.Header().Set("Content-Type", head["Content-Type"])
+		} else {
+			w.Header().Set("Content-Type", "text/html")
+		}
 	body = `
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 ` + body
+	}
+	head["Server"] = programName + "/" + programVersion + " (" + programAuthor + ")"
+
+	for k, v := range head {
+		w.Header().Add(k, v)
+	}
+	w.WriteHeader(code)
 	w.Write([]byte(body))
 }
 func getCmdVersion() (int, error) {
@@ -1734,7 +1768,7 @@ func curl(method string, url string, data string, header map[string]string) (Htt
 		fmt.Println(err)
 	} else {
 		//fmt.Println(res)
-		header["User-Agent"] = "ysun"
+		header["User-Agent"] = programName + "/" + programVersion + " (" + programAuthor + ")"
 		for k, v := range header {
 			req.Header.Add(k, v)
 		}
