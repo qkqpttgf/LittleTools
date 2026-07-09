@@ -201,19 +201,18 @@ echo "临时备份包路径：${tmpbakgz}"
 echo "开始打包内置配置文件..."
 
 # 打包脚本自身、配置、rclone配置、定时任务
-tar -rPvf "${tmpbakfile}" -- "$script_path" "${bakFileConfig}" "${rcloneConfig}"
+tar -rPvf "${tmpbakfile}" "$script_path" "${bakFileConfig}" "${rcloneConfig}"
 # 导出crontab临时文件并打包
 crontmp="${tmpPath}/_crontab_tmp.bak"
 crontab -l > "${crontmp}"
-tar -rPvf "${tmpbakfile}" -- "${crontmp}"
+tar -rPvf "${tmpbakfile}" "${crontmp}"
 rm -f "${crontmp}"
 
 # 循环打包用户自定义备份文件/目录
 echo "开始打包自定义备份清单，共${#fileListArr[@]}项"
 for item in "${fileListArr[@]}"; do
     echo "打包项：${item}"
-    # -- 防止路径以-开头被识别为tar参数
-    tar -rPvf "${tmpbakfile}" -- ${item}
+    tar -rPvf "${tmpbakfile}" ${item}
 done
 
 # gzip压缩
