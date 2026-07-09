@@ -41,16 +41,21 @@ fi
 cat <<EOF >/etc/systemd/system/rclone@.service
 [Unit]
 Description=Rclone Mount Drive %I
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 #Type=idle
 Type=simple
 ExecStartPre=-/usr/bin/mkdir -p "${mountPath}/%i"
 ExecStartPre=-/usr/bin/umount "${mountPath}/%i"
-ExecStart=${rcloneFile} mount "%i:" "${mountPath}/%i" --allow-non-empty --allow-other --config "${configFile}"
+ExecStart="${rcloneFile}" mount "%i:" "${mountPath}/%i" --allow-non-empty --allow-other --vfs-cache-mode writes --config "${configFile}"
 ExecStop=-/usr/bin/umount -f "${mountPath}/%i"
 #ExecStopPost=-/usr/bin/rm -rf "${mountPath}/%i"
+Restart=on-failure
+RestartSec=30
+StartLimitInterval=0
+StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
@@ -65,10 +70,10 @@ for lable in ${lables}; do
   if [ ${#lable} -gt 2 ]; then
     drive=${lable:1:${#lable}-2}
     echo -e "\n\033[92;93m---------${drive}--------\033[0m"
-    echo -e "If stoping at \"\033[92;93mlines xxx (END)\033[0m\", please \033[92;93mPRESS q\033[0m.\n"
-    systemctl start rclone@${drive}
     systemctl enable rclone@${drive}
-    sleep 2
-    systemctl status rclone@${drive} -l
+    systemctl start rclone@${drive}
+    #echo -e "If stoping at \"\033[92;93mlines xxx (END)\033[0m\", please \033[92;93mPRESS q\033[0m.\n"
+    sleep 3
+    systemctl status rclone@${drive} -l --no-pager
   fi
 done
